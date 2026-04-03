@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>metallama</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <header class="page-header">
+        <h1>metallama</h1>
+        <p class="subtitle">Local llama.cpp model control plane</p>
+      </header>
+
+      <section class="panel">
+        <h2>Runtime Config</h2>
+        <form id="config-form">
+          <label>
+            llama.cpp binary path
+            <input id="binary-path" type="text" placeholder="/path/to/llama-server" required />
+          </label>
+          <label>
+            Base URL
+            <input id="base-url" type="text" placeholder="http://127.0.0.1" />
+          </label>
+          <button type="submit">Save config</button>
+          <p id="config-message"></p>
+        </form>
+      </section>
+
+      <section>
+        <div class="servers-header">
+          <h2>Servers</h2>
+          <p id="summary" class="summary"></p>
+        </div>
+        <div id="models" class="cards"></div>
+      </section>
+    </main>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

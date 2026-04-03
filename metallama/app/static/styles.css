@@ -1,0 +1,171 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: #f7f8fb;
+  color: #18202a;
+}
+
+.container {
+  max-width: 980px;
+  margin: 2rem auto;
+  padding: 0 1.1rem 2rem;
+}
+
+h1,
+h2 {
+  margin: 0 0 1rem;
+}
+
+.page-header {
+  margin-bottom: 1rem;
+}
+
+.subtitle {
+  margin: -0.25rem 0 0;
+  color: #5d6c7d;
+}
+
+.panel,
+.cards .card {
+  background: #ffffff;
+  border: 1px solid #d9e0e8;
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  margin-bottom: 1rem;
+  box-shadow: 0 3px 12px rgba(23, 31, 43, 0.04);
+}
+
+label {
+  display: block;
+  margin-bottom: 0.75rem;
+  font-weight: 600;
+  color: #34465a;
+}
+
+input {
+  width: 100%;
+  margin-top: 0.25rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px solid #c4d1df;
+  border-radius: 8px;
+  color: #18202a;
+}
+
+button {
+  padding: 0.5rem 0.85rem;
+  border: 1px solid #0f4aa0;
+  background: #1d61bf;
+  color: #fff;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.servers-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.summary {
+  margin: 0;
+  color: #516276;
+  font-size: 0.95rem;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.card-head h3 {
+  margin: 0;
+}
+
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.65rem 0;
+}
+
+.tag {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid #c9d4e0;
+  border-radius: 999px;
+  font-size: 0.78rem;
+  color: #3a5067;
+}
+
+.status {
+  display: inline-block;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  font-weight: 700;
+}
+
+.status.running {
+  background: #d7f5e6;
+  color: #0d613e;
+}
+
+.status.stopped {
+  background: #edf1f5;
+  color: #4d5f72;
+}
+
+.description {
+  margin: 0 0 0.55rem;
+  color: #415365;
+  font-size: 0.93rem;
+}
+
+.meta {
+  margin: 0.28rem 0;
+  color: #3f4f61;
+  font-size: 0.9rem;
+}
+
+.actions {
+  margin-top: 0.85rem;
+  display: flex;
+  gap: 0.45rem;
+}
+
+#config-message {
+  min-height: 1rem;
+  margin-top: 0.5rem;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 640px) {
+  .container {
+    margin-top: 1.2rem;
+  }
+
+  .servers-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+  }
+}
