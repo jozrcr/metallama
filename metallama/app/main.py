@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import io
+import json
 import os
 import shlex
 import signal
@@ -9,12 +11,15 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+import uuid
+import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import File, Form, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -94,6 +99,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
+transcript_semaphore = asyncio.Semaphore(1)
 
 
 def _is_alive(proc: subprocess.Popen[str]) -> bool:
@@ -202,6 +208,197 @@ def _model_payload(profile: ModelProfile) -> dict[str, Any]:
     }
 
 
+def _normalize_audio_to_wav(input_bytes: bytes) -> bytes:
+    command = [
+        "ffmpeg",
+        "-i",
+        "pipe:0",
+        "-ar",
+        "16000",
+        "-ac",
+        "1",
+        "-c:a",
+        "pcm_s16le",
+        "-f",
+        "wav",
+        "pipe:1",
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            input=input_bytes,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=500, detail="ffmpeg is not installed on the server") from exc
+
+    if result.returncode != 0:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Audio normalization failed: {result.stderr.decode(errors='ignore').strip()}",
+        )
+
+    if not result.stdout:
+        raise HTTPException(status_code=400, detail="Audio normalization produced empty output")
+
+    return result.stdout
+
+
+def _split_wav_chunks(wav_bytes: bytes, chunk_seconds: float = 25.0) -> list[bytes]:
+    with wave.open(io.BytesIO(wav_bytes), "rb") as wav_reader:
+        channels = wav_reader.getnchannels()
+        sample_width = wav_reader.getsampwidth()
+        sample_rate = wav_reader.getframerate()
+        header_frame_count = wav_reader.getnframes()
+        raw_frames = wav_reader.readframes(header_frame_count)
+
+    frame_size = channels * sample_width
+    frame_count = len(raw_frames) // frame_size
+    frames_per_chunk = max(1, int(sample_rate * chunk_seconds))
+    chunks: list[bytes] = []
+
+    for start_frame in range(0, frame_count, frames_per_chunk):
+        end_frame = min(frame_count, start_frame + frames_per_chunk)
+        start_byte = start_frame * frame_size
+        end_byte = end_frame * frame_size
+        chunk_frames = raw_frames[start_byte:end_byte]
+
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as writer:
+            writer.setnchannels(channels)
+            writer.setsampwidth(sample_width)
+            writer.setframerate(sample_rate)
+            writer.writeframes(chunk_frames)
+        chunks.append(buffer.getvalue())
+
+    return chunks
+
+
+def _format_timestamp(seconds: float) -> str:
+    whole = max(0, int(seconds))
+    mins, secs = divmod(whole, 60)
+    hours, mins = divmod(mins, 60)
+    if hours:
+        return f"{hours:02d}:{mins:02d}:{secs:02d}"
+    return f"{mins:02d}:{secs:02d}"
+
+
+def _extract_chunk_text(payload: Any, include_timecodes: bool) -> str:
+    if isinstance(payload, dict):
+        if include_timecodes and isinstance(payload.get("segments"), list):
+            lines: list[str] = []
+            for segment in payload["segments"]:
+                if not isinstance(segment, dict):
+                    continue
+                start = _format_timestamp(float(segment.get("t0", 0)) / 100.0)
+                end = _format_timestamp(float(segment.get("t1", 0)) / 100.0)
+                text = str(segment.get("text", "")).strip()
+                if text:
+                    lines.append(f"[{start} - {end}] {text}")
+            if lines:
+                return "\n".join(lines)
+
+        text = payload.get("text")
+        if isinstance(text, str):
+            return text.strip()
+
+    if isinstance(payload, str):
+        return payload.strip()
+
+    return ""
+
+
+def _collapse_repetitions(text: str) -> str:
+    tokens = text.split()
+    if len(tokens) < 20:
+        return text.strip()
+
+    cleaned: list[str] = []
+    current = ""
+    run = 0
+    for token in tokens:
+        if token == current:
+            run += 1
+            if run <= 6:
+                cleaned.append(token)
+        else:
+            current = token
+            run = 1
+            cleaned.append(token)
+
+    return " ".join(cleaned).strip()
+
+
+async def _request_whisper_chunk(chunk_wav: bytes, language: str) -> Any:
+    profile = MODEL_PROFILES.get("whisper-large-v3")
+    if not profile:
+        raise HTTPException(status_code=500, detail="Whisper model profile is not configured")
+
+    if _status_for(profile) != "running":
+        raise HTTPException(status_code=409, detail="Audio server is not running. Start Whisper server first.")
+
+    data = {
+        "task": "transcribe",
+        "temperature": "0.0",
+    }
+    if language in {"fr", "en"}:
+        data["language"] = language
+
+    boundary = f"----metallama-{uuid.uuid4().hex}"
+    body = bytearray()
+    for key, value in data.items():
+        body.extend(f"--{boundary}\r\n".encode("utf-8"))
+        body.extend(f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode("utf-8"))
+        body.extend(f"{value}\r\n".encode("utf-8"))
+
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(b'Content-Disposition: form-data; name="file"; filename="chunk.wav"\r\n')
+    body.extend(b"Content-Type: audio/wav\r\n\r\n")
+    body.extend(chunk_wav)
+    body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+    def _send_request() -> tuple[int, str, str]:
+        request = urllib.request.Request(
+            url=f"http://127.0.0.1:{profile.port}/inference",
+            data=bytes(body),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=180) as response:
+                status = response.status
+                content_type = response.headers.get("Content-Type", "")
+                payload = response.read().decode("utf-8", errors="ignore")
+                return status, content_type, payload
+        except urllib.error.HTTPError as exc:
+            payload = exc.read().decode("utf-8", errors="ignore")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Whisper inference failed ({exc.code}): {payload[:400]}",
+            ) from exc
+        except urllib.error.URLError as exc:
+            raise HTTPException(status_code=502, detail=f"Cannot reach whisper server: {exc}") from exc
+
+    status, content_type, payload = await asyncio.to_thread(_send_request)
+
+    if status >= 400:
+        raise HTTPException(status_code=502, detail=f"Whisper inference failed ({status})")
+
+    if "json" in content_type:
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return {"text": payload}
+    return payload
+
+
+def _ndjson_line(payload: dict[str, Any]) -> bytes:
+    return (json.dumps(payload, ensure_ascii=True) + "\n").encode("utf-8")
+
+
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "index.html"))
@@ -304,3 +501,111 @@ def model_command_preview(model_id: str) -> dict[str, str]:
         raise HTTPException(status_code=404, detail="Unknown model id")
     command = _build_command(profile)
     return {"command": shlex.join(command)}
+
+
+@app.post("/api/transcript/stream")
+async def transcript_stream(
+    file: UploadFile = File(...),
+    language: str = Form("auto"),
+    include_timecodes: bool = Form(False),
+) -> StreamingResponse:
+    if language not in {"auto", "fr", "en"}:
+        raise HTTPException(status_code=400, detail="Invalid language. Use auto, fr, or en.")
+
+    raw_audio = await file.read()
+    if not raw_audio:
+        raise HTTPException(status_code=400, detail="Uploaded audio file is empty")
+
+    async def stream() -> AsyncIterator[bytes]:
+        try:
+            if transcript_semaphore.locked():
+                yield _ndjson_line(
+                    {
+                        "event": "queued",
+                        "message": "Another transcription is running. Waiting for GPU slot...",
+                        "progress": 0,
+                    }
+                )
+
+            async with transcript_semaphore:
+                started_at = time.time()
+                yield _ndjson_line(
+                    {
+                        "event": "status",
+                        "message": "Normalizing audio with ffmpeg...",
+                        "progress": 2,
+                    }
+                )
+
+                wav_bytes = await asyncio.to_thread(_normalize_audio_to_wav, raw_audio)
+
+                yield _ndjson_line(
+                    {
+                        "event": "status",
+                        "message": "Chunking audio for progressive transcription...",
+                        "progress": 5,
+                    }
+                )
+
+                chunks = await asyncio.to_thread(_split_wav_chunks, wav_bytes, 25.0)
+                total_chunks = max(1, len(chunks))
+                parts: list[str] = []
+
+                for index, chunk in enumerate(chunks, start=1):
+                    before_chunk_progress = 5 + int(((index - 1) / total_chunks) * 90)
+                    after_chunk_progress = 5 + int((index / total_chunks) * 90)
+                    yield _ndjson_line(
+                        {
+                            "event": "status",
+                            "message": f"Transcribing chunk {index}/{total_chunks}...",
+                            "progress": before_chunk_progress,
+                        }
+                    )
+
+                    payload = await _request_whisper_chunk(chunk, language)
+                    chunk_text = _extract_chunk_text(payload, include_timecodes=include_timecodes)
+                    if chunk_text:
+                        parts.append(chunk_text)
+
+                    live_text = _collapse_repetitions("\n".join(parts))
+                    yield _ndjson_line(
+                        {
+                            "event": "partial",
+                            "progress": after_chunk_progress,
+                            "text": live_text,
+                            "chunk_index": index,
+                            "chunk_total": total_chunks,
+                        }
+                    )
+
+                final_text = _collapse_repetitions("\n".join(parts))
+                elapsed_ms = int((time.time() - started_at) * 1000)
+                yield _ndjson_line(
+                    {
+                        "event": "done",
+                        "progress": 100,
+                        "text": final_text,
+                        "elapsed_ms": elapsed_ms,
+                        "language": language,
+                    }
+                )
+        except HTTPException as exc:
+            yield _ndjson_line(
+                {
+                    "event": "error",
+                    "message": str(exc.detail),
+                }
+            )
+        except Exception as exc:  # pragma: no cover
+            yield _ndjson_line(
+                {
+                    "event": "error",
+                    "message": f"Unexpected transcription failure: {exc}",
+                }
+            )
+
+    return StreamingResponse(
+        stream(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

@@ -3,10 +3,25 @@ const uiMessageEl = document.getElementById("ui-message");
 const summaryEl = document.getElementById("summary");
 const themeButtons = document.querySelectorAll(".theme-btn");
 const heroLogoEl = document.getElementById("hero-logo");
+const transcriptFormEl = document.getElementById("transcript-form");
+const audioFileEl = document.getElementById("audio-file");
+const fileLabelEl = document.getElementById("file-label");
+const languageEl = document.getElementById("transcript-language");
+const timecodesEl = document.getElementById("timecodes");
+const transcribeBtnEl = document.getElementById("transcribe-btn");
+const transcriptProgressWrapEl = document.getElementById("transcript-progress-wrap");
+const transcriptProgressEl = document.getElementById("transcript-progress");
+const transcriptProgressValueEl = document.getElementById("transcript-progress-value");
+const transcriptStatusEl = document.getElementById("transcript-status");
+const transcriptErrorEl = document.getElementById("transcript-error");
+const transcriptLiveEl = document.getElementById("transcript-live");
+const transcriptOutputSectionEl = document.getElementById("transcript-output-section");
+const copyTranscriptBtnEl = document.getElementById("copy-transcript-btn");
 
 const THEME_KEY = "metallama.theme";
 
 let inFlight = new Set();
+let transcriptionInFlight = false;
 
 function setConfigMessage(msg, isError = false) {
   uiMessageEl.textContent = msg;
@@ -216,10 +231,202 @@ modelsEl.addEventListener("click", async (event) => {
 
 async function init() {
   setupThemeSwitcher();
+  setupTranscriptUI();
   await refreshModels();
   setInterval(() => {
     refreshModels().catch(() => {});
   }, 2000);
+}
+
+function updateTranscriptProgress(value, statusText) {
+  const normalizedValue = Math.max(0, Math.min(100, Number(value || 0)));
+  transcriptProgressEl.style.width = `${normalizedValue}%`;
+  transcriptProgressValueEl.textContent = `${Math.round(normalizedValue)}%`;
+  const progressTrack = transcriptProgressEl.closest(".transcript-progress-track");
+  if (progressTrack) {
+    progressTrack.setAttribute("aria-valuenow", String(Math.round(normalizedValue)));
+  }
+  transcriptStatusEl.textContent = statusText || "Working...";
+}
+
+function setTranscriptionRunning(running) {
+  transcriptionInFlight = running;
+  transcribeBtnEl.disabled = running;
+  audioFileEl.disabled = running;
+  languageEl.disabled = running;
+  timecodesEl.disabled = running;
+  transcriptProgressWrapEl.classList.toggle("is-hidden", !running);
+  if (!running) {
+    updateTranscriptProgress(0, "Idle");
+  }
+}
+
+function updateFileLabel() {
+  const file = audioFileEl.files?.[0];
+  fileLabelEl.textContent = file ? `Selected: ${file.name}` : "No file selected";
+}
+
+function setTranscriptError(message = "") {
+  if (!message) {
+    transcriptErrorEl.textContent = "";
+    transcriptErrorEl.classList.remove("visible");
+    return;
+  }
+
+  transcriptErrorEl.textContent = message;
+  transcriptErrorEl.classList.add("visible");
+}
+
+function updateTranscriptVisibility() {
+  const hasText = Boolean((transcriptLiveEl.textContent || "").trim());
+  const shouldShow = transcriptionInFlight || hasText;
+  transcriptOutputSectionEl.classList.toggle("is-hidden", !shouldShow);
+}
+
+function setupTranscriptUI() {
+  if (!transcriptFormEl) {
+    return;
+  }
+
+  updateTranscriptVisibility();
+
+  audioFileEl.addEventListener("change", updateFileLabel);
+
+  const dropZone = transcriptFormEl.querySelector(".file-drop");
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropZone.classList.add("drag-over");
+    });
+  });
+  ["dragleave", "drop"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      if (eventName === "drop") {
+        const dt = event.dataTransfer;
+        if (dt?.files?.length) {
+          audioFileEl.files = dt.files;
+          updateFileLabel();
+        }
+      }
+      dropZone.classList.remove("drag-over");
+    });
+  });
+
+  transcriptFormEl.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (transcriptionInFlight) {
+      return;
+    }
+
+    const file = audioFileEl.files?.[0];
+    if (!file) {
+      setTranscriptError("");
+      updateTranscriptProgress(0, "Choose an audio file first");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("language", languageEl.value);
+    formData.append("include_timecodes", String(Boolean(timecodesEl.checked)));
+
+    transcriptLiveEl.textContent = "";
+    setTranscriptError("");
+    setTranscriptionRunning(true);
+    updateTranscriptVisibility();
+    updateTranscriptProgress(0, "Uploading and preparing...");
+
+    try {
+      const response = await fetch("/api/transcript/stream", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok || !response.body) {
+        const text = await response.text();
+        throw new Error(text || `Request failed (${response.status})`);
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) {
+            continue;
+          }
+
+          let payload;
+          try {
+            payload = JSON.parse(trimmed);
+          } catch {
+            continue;
+          }
+
+          if (payload.event === "queued") {
+            updateTranscriptProgress(payload.progress || 1, payload.message || "Queued...");
+          }
+
+          if (payload.event === "status") {
+            updateTranscriptProgress(payload.progress || 0, payload.message || "Working...");
+          }
+
+          if (payload.event === "partial") {
+            transcriptLiveEl.textContent = payload.text || "";
+            updateTranscriptVisibility();
+            updateTranscriptProgress(payload.progress || 0, `Transcribing ${payload.chunk_index || ""}/${payload.chunk_total || ""}`);
+          }
+
+          if (payload.event === "done") {
+            transcriptLiveEl.textContent = payload.text || "";
+            updateTranscriptVisibility();
+            const elapsed = Number(payload.elapsed_ms || 0);
+            const elapsedSec = (elapsed / 1000).toFixed(1);
+            updateTranscriptProgress(100, `Completed in ${elapsedSec}s`);
+          }
+
+          if (payload.event === "error") {
+            throw new Error(payload.message || "Transcription failed");
+          }
+        }
+      }
+    } catch (err) {
+      const message = err.message || "Transcription failed";
+      setConfigMessage(message, true);
+      setTranscriptError(message);
+      updateTranscriptProgress(0, message);
+    } finally {
+      setTranscriptionRunning(false);
+      updateTranscriptVisibility();
+    }
+  });
+
+  copyTranscriptBtnEl.addEventListener("click", async () => {
+    const text = transcriptLiveEl.textContent || "";
+    if (!text.trim()) {
+      setConfigMessage("No transcript text to copy", true);
+      return;
+    }
+
+    try {
+      await copyToClipboard(text);
+      setConfigMessage("Transcript copied");
+    } catch (err) {
+      setConfigMessage(err.message || "Copy failed", true);
+    }
+  });
 }
 
 init().catch((err) => {
