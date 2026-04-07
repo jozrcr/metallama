@@ -150,6 +150,11 @@ function setupThemeSwitcher() {
   });
 }
 
+function cardAccentColor(type) {
+  const colors = { LLM: "#3B95DD", AUDIO: "#F4A501", OCR: "#8EC561", DOCS: "#8EC561" };
+  return colors[type] || "var(--line)";
+}
+
 function cardTemplate(model) {
   const action = model.status === "running" ? "stop" : "start";
   const label = action === "stop" ? "Stop" : "Start";
@@ -157,17 +162,19 @@ function cardTemplate(model) {
   const type = modelTypeLabel(model);
   const cardError = cardErrors.get(model.id) || "";
   const cardErrorClass = cardError ? "card-error visible" : "card-error";
+  const accent = cardAccentColor(type);
+  const isLoading = inFlight.has(model.id);
+  const overlayClass = isLoading ? "panel-overlay card-overlay" : "panel-overlay card-overlay is-hidden";
+  const statusText = action === "start" ? "Starting..." : "Stopping...";
 
   return `
-    <article class="card ${model.status}">
+    <article class="card ${model.status}" data-model-id="${model.id}" style="--card-accent: ${accent}">
       <div class="card-header-row">
         <div class="title-wrap">
-          <span class="type-label ${type.toLowerCase()}">${type}</span>
           <h3>${model.display_name}</h3>
           <span class="model-name-muted">${model.id}</span>
+          <span class="type-label ${type.toLowerCase()}">${type}</span>
         </div>
-        <div class="spacer"></div>
-        <div class="status-badge ${model.status}">${model.status}</div>
       </div>
 
       <div class="card-main-row">
@@ -187,11 +194,19 @@ function cardTemplate(model) {
         <p class="description">${model.description}</p>
 
         <div class="card-actions-col">
+          <div class="status-badge ${model.status}">${model.status}</div>
           <button class="btn-action-${action}" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>
         </div>
       </div>
 
       <p class="${cardErrorClass}" aria-live="polite">${cardError}</p>
+
+      <div class="${overlayClass}">
+        <div class="overlay-content">
+          <div class="spinner"></div>
+          <p class="overlay-status">${statusText}</p>
+        </div>
+      </div>
     </article>
   `;
 }
@@ -209,10 +224,19 @@ async function refreshModels() {
 }
 
 async function startStop(modelId, action) {
+  const targetStatus = action === "start" ? "running" : "stopped";
   inFlight.add(modelId);
+  await refreshModels();
   try {
     await api(`/api/models/${modelId}/${action}`, { method: "POST" });
     setCardError(modelId, "");
+    for (let i = 0; i < 60; i++) {
+      const data = await api(`/api/models/${modelId}/status`);
+      if (data.status === targetStatus) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 500));
+    }
   } finally {
     inFlight.delete(modelId);
     await refreshModels();

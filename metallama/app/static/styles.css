@@ -127,9 +127,13 @@ body {
   margin-top: 2.2rem;
   background: var(--panel);
   border: var(--border-size) solid var(--line);
-  padding: 1rem;
+  border-left: 3px solid var(--panel-accent, var(--line));
+  padding: 1rem 1rem 1rem 1.2rem;
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.08);
 }
+
+.transcript-panel.service-audio { --panel-accent: #F4A501; }
+.transcript-panel.service-ocr   { --panel-accent: #8EC561; }
 
 .transcript-header h2 {
   margin: 0;
@@ -184,15 +188,15 @@ body {
 }
 
 #transcribe-btn {
-  background: #1d4ed8;
+  background: #F4A501;
   color: #ffffff;
-  border: var(--border-size) solid color-mix(in srgb, #1d4ed8 82%, #000000);
+  border: var(--border-size) solid color-mix(in srgb, #F4A501 82%, #000000);
 }
 
 #ocr-btn {
-  background: #0f766e;
+  background: #8EC561;
   color: #ffffff;
-  border: var(--border-size) solid color-mix(in srgb, #0f766e 82%, #000000);
+  border: var(--border-size) solid color-mix(in srgb, #8EC561 82%, #000000);
 }
 
 .transcript-controls {
@@ -230,7 +234,8 @@ body {
 }
 
 /* ── Panel overlay (loading) ─────────────────────────────── */
-.transcript-panel {
+.transcript-panel,
+.card {
   position: relative;
 }
 
@@ -241,9 +246,9 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--panel) 55%, transparent);
-  backdrop-filter: blur(4px);
-  -webkit-backdrop-filter: blur(4px);
+  background: color-mix(in srgb, var(--panel) 60%, transparent);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
 }
 
 .panel-overlay.is-hidden {
@@ -293,6 +298,16 @@ body {
 
 .btn-cancel:hover {
   background: color-mix(in srgb, var(--red) 12%, transparent);
+}
+
+.card-overlay .spinner {
+  width: 24px;
+  height: 24px;
+  border-width: 2.5px;
+}
+
+.card-overlay .overlay-status {
+  font-size: 0.7rem;
 }
 
 .transcript-error {
@@ -386,9 +401,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.7rem;
-  padding: 0.9rem 1rem;
+  padding: 0.9rem 1rem 0.9rem 1.2rem;
   background: var(--panel);
   border: var(--border-size) solid var(--line);
+  border-left: 3px solid var(--card-accent, var(--line));
   transition: transform 0.1s ease;
   border-radius: 0;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
@@ -442,22 +458,22 @@ body {
 }
 
 .type-label.llm {
-  background: #1d4ed8;
+  background: #3B95DD;
   color: #ffffff;
 }
 
 .type-label.audio {
-  background: #15803d;
+  background: #F4A501;
   color: #ffffff;
 }
 
 .type-label.ocr {
-  background: #7c3aed;
+  background: #8EC561;
   color: #ffffff;
 }
 
 .type-label.docs {
-  background: #0f766e;
+  background: #8EC561;
   color: #ffffff;
 }
 
@@ -490,9 +506,27 @@ body {
 
 .card-actions-col {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-self: end;
   gap: 0;
+}
+
+.status-badge,
+.btn-action-start,
+.btn-action-stop {
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  padding: 7px 16px;
+  line-height: 1;
+  text-align: center;
+  border-radius: 0;
+  border: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 80px;
 }
 
 .card-error {
@@ -551,36 +585,20 @@ body {
 }
 
 .status-badge {
-  font-weight: 900;
-  text-transform: uppercase;
-  font-size: 0.66rem;
-  padding: 3px 8px;
-  border-radius: 0;
-  color: #fff;
+  background: transparent;
+  border: 2px solid currentColor;
 }
 
-.status-badge.running { background: var(--green); }
-.status-badge.stopped { background: var(--red); }
-
-.btn-action-start,
-.btn-action-stop {
-  font-weight: 900;
-  text-transform: uppercase;
-  font-size: 0.72rem;
-  letter-spacing: 0.04em;
-  padding: 6px 18px;
-  line-height: 1;
-  text-align: center;
-  border-radius: 0;
-}
+.status-badge.running { color: var(--green); }
+.status-badge.stopped { color: var(--red); }
 
 .btn-action-start {
-  background: #1d4ed8;
+  background: var(--green);
   color: #ffffff;
 }
 
 .btn-action-stop {
-  background: #ea580c;
+  background: var(--red);
   color: #ffffff;
 }
 
