@@ -91,9 +91,63 @@
           <article>
             <div class="transcript-output-header">
               <h3>Transcript</h3>
-              <button id="copy-transcript-btn" class="btn-secondary btn-small" type="button">Copy</button>
+              <div class="action-row">
+                <button id="copy-transcript-btn" class="btn-secondary btn-small" type="button">Copy</button>
+                <button id="download-transcript-btn" class="btn-secondary btn-small" type="button">Download .md</button>
+              </div>
             </div>
             <pre id="transcript-live" class="transcript-output"></pre>
+          </article>
+        </div>
+      </section>
+
+      <section class="transcript-panel" aria-labelledby="ocr-title">
+        <div class="transcript-header">
+          <h2 id="ocr-title">Document OCR</h2>
+          <p>Drop a PDF or image and extract markdown from MinerU.</p>
+        </div>
+
+        <form id="ocr-form" class="transcript-form">
+          <div class="transcript-form-row">
+            <label class="file-drop" for="ocr-file">
+              <input id="ocr-file" name="ocr-file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required />
+              <span class="file-drop-label">Drop document file here or click to select</span>
+              <span id="ocr-file-label">No file selected</span>
+            </label>
+
+            <div class="transcript-controls">
+              <label>
+                <span>Parse method</span>
+                <select id="ocr-parse-method" name="parse-method">
+                  <option value="auto">auto</option>
+                </select>
+              </label>
+
+              <button id="ocr-btn" type="submit">Extract OCR</button>
+            </div>
+          </div>
+        </form>
+
+        <p id="ocr-error" class="transcript-error" aria-live="polite"></p>
+
+        <div id="ocr-progress-wrap" class="transcript-progress-wrap is-hidden">
+          <div class="transcript-progress-track" aria-label="OCR progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="ocr-progress" class="transcript-progress-fill"></div>
+          </div>
+          <p id="ocr-progress-value" class="transcript-progress-value">0%</p>
+          <p id="ocr-status" class="transcript-status">Idle</p>
+        </div>
+
+        <div id="ocr-output-section" class="transcript-output-grid single is-hidden">
+          <article>
+            <div class="transcript-output-header">
+              <h3>Markdown output</h3>
+              <div class="action-row">
+                <button id="copy-ocr-btn" class="btn-secondary btn-small" type="button">Copy</button>
+                <button id="download-ocr-btn" class="btn-secondary btn-small" type="button">Download .md</button>
+              </div>
+            </div>
+            <pre id="ocr-live" class="transcript-output"></pre>
           </article>
         </div>
       </section>

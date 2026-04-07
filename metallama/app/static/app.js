@@ -17,11 +17,28 @@ const transcriptErrorEl = document.getElementById("transcript-error");
 const transcriptLiveEl = document.getElementById("transcript-live");
 const transcriptOutputSectionEl = document.getElementById("transcript-output-section");
 const copyTranscriptBtnEl = document.getElementById("copy-transcript-btn");
+const downloadTranscriptBtnEl = document.getElementById("download-transcript-btn");
+
+const ocrFormEl = document.getElementById("ocr-form");
+const ocrFileEl = document.getElementById("ocr-file");
+const ocrFileLabelEl = document.getElementById("ocr-file-label");
+const ocrParseMethodEl = document.getElementById("ocr-parse-method");
+const ocrBtnEl = document.getElementById("ocr-btn");
+const ocrProgressWrapEl = document.getElementById("ocr-progress-wrap");
+const ocrProgressEl = document.getElementById("ocr-progress");
+const ocrProgressValueEl = document.getElementById("ocr-progress-value");
+const ocrStatusEl = document.getElementById("ocr-status");
+const ocrErrorEl = document.getElementById("ocr-error");
+const ocrLiveEl = document.getElementById("ocr-live");
+const ocrOutputSectionEl = document.getElementById("ocr-output-section");
+const copyOcrBtnEl = document.getElementById("copy-ocr-btn");
+const downloadOcrBtnEl = document.getElementById("download-ocr-btn");
 
 const THEME_KEY = "metallama.theme";
 
 let inFlight = new Set();
 let transcriptionInFlight = false;
+let ocrInFlight = false;
 const cardErrors = new Map();
 
 function setCardError(modelId, message = "") {
@@ -216,6 +233,28 @@ async function copyToClipboard(text) {
   document.body.removeChild(temp);
 }
 
+function sanitizeFilename(input) {
+  return String(input || "")
+    .replace(/\.[^/.]+$/, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 80);
+}
+
+function downloadMarkdownFile(fileNameBase, markdownText) {
+  const base = sanitizeFilename(fileNameBase) || "output";
+  const blob = new Blob([markdownText], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = `${base}.md`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
+
 modelsEl.addEventListener("click", async (event) => {
   const target = event.target;
   if (!(target instanceof HTMLButtonElement)) {
@@ -266,6 +305,7 @@ modelsEl.addEventListener("click", async (event) => {
 async function init() {
   setupThemeSwitcher();
   setupTranscriptUI();
+  setupOcrUI();
   await refreshModels();
   setInterval(() => {
     refreshModels().catch(() => {});
@@ -309,6 +349,50 @@ function setTranscriptError(message = "") {
 
   transcriptErrorEl.textContent = message;
   transcriptErrorEl.classList.add("visible");
+}
+
+function updateOcrProgress(value, statusText) {
+  const normalizedValue = Math.max(0, Math.min(100, Number(value || 0)));
+  ocrProgressEl.style.width = `${normalizedValue}%`;
+  ocrProgressValueEl.textContent = `${Math.round(normalizedValue)}%`;
+  const progressTrack = ocrProgressEl.closest(".transcript-progress-track");
+  if (progressTrack) {
+    progressTrack.setAttribute("aria-valuenow", String(Math.round(normalizedValue)));
+  }
+  ocrStatusEl.textContent = statusText || "Working...";
+}
+
+function setOcrRunning(running) {
+  ocrInFlight = running;
+  ocrBtnEl.disabled = running;
+  ocrFileEl.disabled = running;
+  ocrParseMethodEl.disabled = running;
+  ocrProgressWrapEl.classList.toggle("is-hidden", !running);
+  if (!running) {
+    updateOcrProgress(0, "Idle");
+  }
+}
+
+function updateOcrFileLabel() {
+  const file = ocrFileEl.files?.[0];
+  ocrFileLabelEl.textContent = file ? `Selected: ${file.name}` : "No file selected";
+}
+
+function setOcrError(message = "") {
+  if (!message) {
+    ocrErrorEl.textContent = "";
+    ocrErrorEl.classList.remove("visible");
+    return;
+  }
+
+  ocrErrorEl.textContent = message;
+  ocrErrorEl.classList.add("visible");
+}
+
+function updateOcrVisibility() {
+  const hasText = Boolean((ocrLiveEl.textContent || "").trim());
+  const shouldShow = ocrInFlight || hasText;
+  ocrOutputSectionEl.classList.toggle("is-hidden", !shouldShow);
 }
 
 function updateTranscriptVisibility() {
@@ -460,6 +544,138 @@ function setupTranscriptUI() {
     } catch (err) {
       setConfigMessage(err.message || "Copy failed", true);
     }
+  });
+
+  downloadTranscriptBtnEl.addEventListener("click", () => {
+    const text = transcriptLiveEl.textContent || "";
+    if (!text.trim()) {
+      setConfigMessage("No transcript text to download", true);
+      return;
+    }
+
+    downloadMarkdownFile(`transcript-${new Date().toISOString().slice(0, 10)}`, text);
+    setConfigMessage("Transcript markdown downloaded");
+  });
+}
+
+function setupOcrUI() {
+  if (!ocrFormEl) {
+    return;
+  }
+
+  updateOcrVisibility();
+  ocrFileEl.addEventListener("change", updateOcrFileLabel);
+
+  const dropZone = ocrFormEl.querySelector(".file-drop");
+  ["dragenter", "dragover"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      dropZone.classList.add("drag-over");
+    });
+  });
+  ["dragleave", "drop"].forEach((eventName) => {
+    dropZone.addEventListener(eventName, (event) => {
+      event.preventDefault();
+      if (eventName === "drop") {
+        const dt = event.dataTransfer;
+        if (dt?.files?.length) {
+          ocrFileEl.files = dt.files;
+          updateOcrFileLabel();
+        }
+      }
+      dropZone.classList.remove("drag-over");
+    });
+  });
+
+  ocrFormEl.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (ocrInFlight) {
+      return;
+    }
+
+    const file = ocrFileEl.files?.[0];
+    if (!file) {
+      setOcrError("");
+      updateOcrProgress(0, "Choose a document file first");
+      return;
+    }
+
+    const suffix = (file.name.split(".").pop() || "").toLowerCase();
+    if (!["pdf", "png", "jpg", "jpeg"].includes(suffix)) {
+      setOcrError("Unsupported format. Use PDF, PNG, JPG, or JPEG.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("parse_method", ocrParseMethodEl.value || "auto");
+    formData.append("backend", "pipeline");
+
+    ocrLiveEl.textContent = "";
+    setOcrError("");
+    setOcrRunning(true);
+    updateOcrVisibility();
+    updateOcrProgress(5, "Uploading file...");
+
+    try {
+      const response = await fetch("/api/ocr/parse", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(async () => ({ detail: await response.text() }));
+        throw new Error(payload.detail || `Request failed (${response.status})`);
+      }
+
+      updateOcrProgress(70, "Parsing document...");
+      const data = await response.json();
+      const markdown = String(data.markdown || "");
+      if (!markdown.trim()) {
+        throw new Error("OCR completed but no markdown was returned");
+      }
+
+      ocrLiveEl.textContent = markdown;
+      ocrLiveEl.dataset.sourceName = data.filename || file.name;
+      updateOcrVisibility();
+      updateOcrProgress(100, "OCR completed");
+      setConfigMessage("OCR extraction finished");
+    } catch (err) {
+      const message = err.message || "OCR extraction failed";
+      setConfigMessage(message, true);
+      setOcrError(message);
+      updateOcrProgress(0, message);
+    } finally {
+      setOcrRunning(false);
+      updateOcrVisibility();
+    }
+  });
+
+  copyOcrBtnEl.addEventListener("click", async () => {
+    const text = ocrLiveEl.textContent || "";
+    if (!text.trim()) {
+      setConfigMessage("No OCR text to copy", true);
+      return;
+    }
+
+    try {
+      await copyToClipboard(text);
+      setConfigMessage("OCR markdown copied");
+    } catch (err) {
+      setConfigMessage(err.message || "Copy failed", true);
+    }
+  });
+
+  downloadOcrBtnEl.addEventListener("click", () => {
+    const text = ocrLiveEl.textContent || "";
+    if (!text.trim()) {
+      setConfigMessage("No OCR text to download", true);
+      return;
+    }
+
+    const sourceName = ocrLiveEl.dataset.sourceName || "ocr-output";
+    downloadMarkdownFile(sourceName, text);
+    setConfigMessage("OCR markdown downloaded");
   });
 }
 

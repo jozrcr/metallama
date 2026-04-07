@@ -189,6 +189,12 @@ body {
   border: var(--border-size) solid color-mix(in srgb, #1d4ed8 82%, #000000);
 }
 
+#ocr-btn {
+  background: #0f766e;
+  color: #ffffff;
+  border: var(--border-size) solid color-mix(in srgb, #0f766e 82%, #000000);
+}
+
 .transcript-controls {
   display: grid;
   gap: 0.8rem;
@@ -310,6 +316,11 @@ body {
 
 .transcript-output-header h3 {
   margin: 0;
+}
+
+.action-row {
+  display: flex;
+  gap: 0.45rem;
 }
 
 .transcript-output {
