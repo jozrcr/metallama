@@ -22,18 +22,23 @@ const ocrFormEl = document.getElementById("ocr-form");
 const ocrFileEl = document.getElementById("ocr-file");
 const ocrFileLabelEl = document.querySelector(".service-ocr .file-drop-label");
 const ocrParseMethodEl = document.getElementById("ocr-parse-method");
-const ocrExtractImagesEl = document.getElementById("ocr-extract-images");
 const ocrBtnEl = document.getElementById("ocr-btn");
+const ocrClearBtnEl = document.getElementById("ocr-clear-btn");
 const ocrOverlayEl = document.getElementById("ocr-overlay");
 const ocrStatusEl = document.getElementById("ocr-status");
 const cancelOcrBtnEl = document.getElementById("cancel-ocr-btn");
 const ocrErrorEl = document.getElementById("ocr-error");
 const ocrLiveEl = document.getElementById("ocr-live");
 const ocrImageCountEl = document.getElementById("ocr-image-count");
+const ocrQueueListEl = document.getElementById("ocr-queue-list");
+const ocrDetailFilenameEl = document.getElementById("ocr-detail-filename");
+const ocrDetailStatusEl = document.getElementById("ocr-detail-status");
 const ocrOutputSectionEl = document.getElementById("ocr-output-section");
 const copyOcrBtnEl = document.getElementById("copy-ocr-btn");
 const downloadOcrBtnEl = document.getElementById("download-ocr-btn");
 const downloadOcrZipBtnEl = document.getElementById("download-ocr-zip-btn");
+const OCR_ADD_LABEL = "Add documents [+]";
+const DOWNLOAD_ICON_SVG = '<svg class="ocr-action-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>';
 
 const THEME_KEY = "metallama.theme";
 
@@ -42,8 +47,9 @@ let transcriptionInFlight = false;
 let ocrInFlight = false;
 let transcriptAbortController = null;
 let ocrAbortController = null;
-let ocrZipId = null;
-let ocrImageCount = 0;
+let ocrCancelRequested = false;
+let ocrQueue = [];
+let ocrSelectedId = null;
 const cardErrors = new Map();
 
 function setCardError(modelId, message = "") {
@@ -388,20 +394,70 @@ function setOcrRunning(running) {
   ocrBtnEl.disabled = running;
   ocrFileEl.disabled = running;
   ocrParseMethodEl.disabled = running;
-  ocrExtractImagesEl.disabled = running;
   cancelOcrBtnEl.disabled = !running;
-  ocrOverlayEl.classList.toggle("is-hidden", !running);
 }
 
 function updateOcrFileLabel() {
-  const file = ocrFileEl.files?.[0];
-  if (file) {
-    ocrFileLabelEl.innerHTML = `${FILE_ICON_SVG} ${file.name}`;
+  if (ocrQueue.length > 0) {
+    const plural = ocrQueue.length > 1 ? "s" : "";
+    ocrFileLabelEl.innerHTML = `${FILE_ICON_SVG} ${ocrQueue.length} file${plural} selected [+]`;
     ocrFileLabelEl.classList.add("file-selected");
   } else {
-    ocrFileLabelEl.textContent = "Drop document file here or click to select";
+    ocrFileLabelEl.textContent = OCR_ADD_LABEL;
     ocrFileLabelEl.classList.remove("file-selected");
   }
+}
+
+function ocrFileKey(file) {
+  return `${file.name}::${file.size}::${file.lastModified}`;
+}
+
+function addFilesToOcrQueue(files) {
+  if (!files.length || ocrInFlight) {
+    return;
+  }
+
+  if (ocrQueue.some((item) => item.status !== "pending")) {
+    ocrQueue = [];
+    ocrSelectedId = null;
+  }
+
+  const seen = new Set(ocrQueue.map((item) => ocrFileKey(item.file)));
+  let idx = ocrQueue.length;
+  for (const file of files) {
+    const key = ocrFileKey(file);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    ocrQueue.push({
+      id: `staged-${Date.now()}-${idx}-${file.name}`,
+      name: file.name,
+      file,
+      status: "pending",
+      markdown: "",
+      zipId: null,
+      imageCount: 0,
+      error: "",
+    });
+    idx += 1;
+  }
+
+  if (!ocrSelectedId && ocrQueue.length > 0) {
+    ocrSelectedId = ocrQueue[0].id;
+  }
+}
+
+function stageOcrQueueFromInput() {
+  if (ocrInFlight) {
+    return;
+  }
+
+  const files = Array.from(ocrFileEl.files || []);
+  addFilesToOcrQueue(files);
+  ocrFileEl.value = "";
+  updateOcrFileLabel();
+  updateOcrVisibility();
 }
 
 function setOcrError(message = "") {
@@ -415,17 +471,224 @@ function setOcrError(message = "") {
   ocrErrorEl.classList.add("visible");
 }
 
-function updateOcrVisibility() {
-  const hasText = Boolean((ocrLiveEl.textContent || "").trim());
-  ocrOutputSectionEl.classList.toggle("is-hidden", !hasText);
-  downloadOcrZipBtnEl.classList.toggle("is-hidden", !ocrZipId);
+function getSelectedOcrItem() {
+  return ocrQueue.find((item) => item.id === ocrSelectedId) || null;
+}
 
-  if (ocrImageCount > 0) {
-    ocrImageCountEl.textContent = `${ocrImageCount} images extracted`;
-    ocrImageCountEl.classList.remove("is-hidden");
-  } else {
+function statusClass(status) {
+  if (status === "done") {
+    return "status-done";
+  }
+  if (status === "processing") {
+    return "status-processing";
+  }
+  if (status === "error") {
+    return "status-error";
+  }
+  if (status === "canceled") {
+    return "status-canceled";
+  }
+  return "status-pending";
+}
+
+function statusLabel(status) {
+  if (status === "done") {
+    return "DONE";
+  }
+  if (status === "processing") {
+    return "PROCESSING";
+  }
+  if (status === "error") {
+    return "ERROR";
+  }
+  if (status === "canceled") {
+    return "CANCELED";
+  }
+  return "PENDING";
+}
+
+function renderOcrQueue() {
+  if (!ocrQueueListEl) {
+    return;
+  }
+  ocrQueueListEl.innerHTML = ocrQueue
+    .map((item) => {
+      const active = item.id === ocrSelectedId ? "active" : "";
+      const klass = statusClass(item.status);
+      const removeDisabled = ocrInFlight ? "disabled" : "";
+      const canDownload = item.status === "done" && item.zipId;
+      const downloadButton = canDownload
+        ? `<button class="ocr-queue-download" type="button" data-ocr-download-id="${item.id}" aria-label="Download ${item.name}" title="Download ZIP">${DOWNLOAD_ICON_SVG}</button>`
+        : "";
+      return `<li class="ocr-queue-item ${klass} ${active}">
+        <button class="ocr-queue-main" type="button" data-ocr-item-id="${item.id}" title="${item.name}">
+          <span class="ocr-queue-name">${item.name}</span>
+          <span class="ocr-queue-state">${statusLabel(item.status)}</span>
+        </button>
+        <div class="ocr-queue-actions">
+          ${downloadButton}
+          <button class="ocr-queue-remove" type="button" data-ocr-remove-id="${item.id}" ${removeDisabled} aria-label="Remove ${item.name}">X</button>
+        </div>
+      </li>`;
+    })
+    .join("");
+}
+
+function allDoneWithZip() {
+  return (
+    ocrQueue.length > 0 &&
+    ocrQueue.every((item) => item.status === "done" && Boolean(item.zipId))
+  );
+}
+
+async function triggerZipDownload(zipId, fallbackName = "ocr_output.zip") {
+  const response = await fetch(`/api/ocr/zip/${zipId}`);
+  if (!response.ok) {
+    throw new Error("ZIP download failed");
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^";\n]+)"?/);
+  const zipName = match ? match[1] : fallbackName;
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = zipName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadAllOcrZipBundle() {
+  const items = ocrQueue
+    .filter((item) => item.status === "done" && item.zipId)
+    .map((item) => ({ zip_id: item.zipId, file_name: item.name }));
+
+  if (items.length === 0) {
+    setConfigMessage("No ZIP available", true);
+    return;
+  }
+
+  const response = await fetch("/api/ocr/zip/bundle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ items }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "ZIP bundle download failed");
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const match = disposition.match(/filename="?([^";\n]+)"?/);
+  const name = match ? match[1] : "ocr_bundle.zip";
+
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function renderOcrDetail() {
+  const item = getSelectedOcrItem();
+  if (!item) {
+    ocrDetailFilenameEl.textContent = "Preview";
+    ocrDetailStatusEl.textContent = "";
+    ocrDetailStatusEl.classList.add("is-hidden");
+    ocrLiveEl.textContent = "No result selected yet.";
     ocrImageCountEl.textContent = "";
     ocrImageCountEl.classList.add("is-hidden");
+    copyOcrBtnEl.disabled = true;
+    downloadOcrBtnEl.disabled = true;
+    downloadOcrZipBtnEl.disabled = true;
+    downloadOcrZipBtnEl.classList.add("is-hidden");
+    return;
+  }
+
+  ocrDetailFilenameEl.textContent = item.name;
+  if (item.status === "error") {
+    ocrDetailStatusEl.textContent = item.error || "OCR failed";
+    ocrDetailStatusEl.classList.remove("is-hidden");
+  } else if (item.status === "processing") {
+    ocrDetailStatusEl.textContent = "Processing...";
+    ocrDetailStatusEl.classList.remove("is-hidden");
+  } else if (item.status === "pending") {
+    ocrDetailStatusEl.textContent = "Pending";
+    ocrDetailStatusEl.classList.remove("is-hidden");
+  } else if (item.status === "canceled") {
+    ocrDetailStatusEl.textContent = "Canceled";
+    ocrDetailStatusEl.classList.remove("is-hidden");
+  } else {
+    ocrDetailStatusEl.textContent = "";
+    ocrDetailStatusEl.classList.add("is-hidden");
+  }
+
+  if (item.status === "done") {
+    ocrLiveEl.textContent = item.markdown || "";
+    if (item.imageCount > 0) {
+      ocrImageCountEl.textContent = `${item.imageCount} images extracted`;
+      ocrImageCountEl.classList.remove("is-hidden");
+    } else {
+      ocrImageCountEl.textContent = "";
+      ocrImageCountEl.classList.add("is-hidden");
+    }
+  } else {
+    ocrLiveEl.textContent = "";
+    ocrImageCountEl.textContent = "";
+    ocrImageCountEl.classList.add("is-hidden");
+  }
+
+  const ready = item.status === "done" && Boolean((item.markdown || "").trim());
+  copyOcrBtnEl.disabled = !ready;
+  downloadOcrBtnEl.disabled = !ready;
+
+  const hasZip = ready && Boolean(item.zipId);
+  downloadOcrZipBtnEl.disabled = !hasZip;
+  downloadOcrZipBtnEl.classList.toggle("is-hidden", !hasZip);
+}
+
+function updateOcrOverlayForSelection() {
+  const item = getSelectedOcrItem();
+  const shouldShow = Boolean(
+    ocrInFlight && item && (item.status === "pending" || item.status === "processing")
+  );
+
+  ocrOverlayEl.classList.toggle("is-hidden", !shouldShow);
+  if (!shouldShow) {
+    return;
+  }
+
+  if (item.status === "pending") {
+    updateOcrStatus("Waiting in queue...");
+  } else {
+    updateOcrStatus(`Processing ${item.name}`);
+  }
+}
+
+function updateOcrVisibility() {
+  ocrOutputSectionEl.classList.remove("is-hidden");
+  renderOcrQueue();
+  renderOcrDetail();
+  updateOcrOverlayForSelection();
+
+  if (allDoneWithZip() && !ocrInFlight) {
+    ocrBtnEl.textContent = "Download all (.zip)";
+  } else {
+    ocrBtnEl.textContent = "Extract text";
+  }
+
+  if (ocrClearBtnEl) {
+    const canClear = !ocrInFlight && ocrQueue.length >= 2;
+    ocrClearBtnEl.disabled = !canClear;
+    ocrClearBtnEl.classList.toggle("is-hidden", !canClear);
   }
 }
 
@@ -601,7 +864,10 @@ function setupOcrUI() {
   }
 
   updateOcrVisibility();
-  ocrFileEl.addEventListener("change", updateOcrFileLabel);
+  ocrFileEl.addEventListener("change", () => {
+    updateOcrFileLabel();
+    stageOcrQueueFromInput();
+  });
 
   const dropZone = ocrFormEl.querySelector(".file-drop");
   ["dragenter", "dragover"].forEach((eventName) => {
@@ -616,13 +882,67 @@ function setupOcrUI() {
       if (eventName === "drop") {
         const dt = event.dataTransfer;
         if (dt?.files?.length) {
-          ocrFileEl.files = dt.files;
+          addFilesToOcrQueue(Array.from(dt.files));
           updateOcrFileLabel();
+          updateOcrVisibility();
         }
       }
       dropZone.classList.remove("drag-over");
     });
   });
+
+  if (ocrQueueListEl) {
+    ocrQueueListEl.addEventListener("click", (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement)) {
+        return;
+      }
+      const downloadId = target.dataset.ocrDownloadId;
+      if (downloadId) {
+        const item = ocrQueue.find((entry) => entry.id === downloadId);
+        if (!item?.zipId) {
+          return;
+        }
+        triggerZipDownload(item.zipId, `${item.name}.zip`).catch((err) => {
+          setConfigMessage(err.message || "ZIP download failed", true);
+        });
+        return;
+      }
+      const removeId = target.dataset.ocrRemoveId;
+      if (removeId) {
+        if (ocrInFlight) {
+          return;
+        }
+        ocrQueue = ocrQueue.filter((item) => item.id !== removeId);
+        if (ocrSelectedId === removeId) {
+          ocrSelectedId = ocrQueue[0]?.id || null;
+        }
+        updateOcrFileLabel();
+        updateOcrVisibility();
+        return;
+      }
+      const itemId = target.dataset.ocrItemId;
+      if (!itemId) {
+        return;
+      }
+      ocrSelectedId = itemId;
+      updateOcrVisibility();
+    });
+  }
+
+  if (ocrClearBtnEl) {
+    ocrClearBtnEl.addEventListener("click", () => {
+      if (ocrInFlight) {
+        return;
+      }
+      ocrQueue = [];
+      ocrSelectedId = null;
+      ocrFileEl.value = "";
+      setOcrError("");
+      updateOcrFileLabel();
+      updateOcrVisibility();
+    });
+  }
 
   ocrFormEl.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -630,89 +950,146 @@ function setupOcrUI() {
       return;
     }
 
-    const file = ocrFileEl.files?.[0];
-    if (!file) {
-      setOcrError("Choose a document file first");
+    if (allDoneWithZip()) {
+      try {
+        await downloadAllOcrZipBundle();
+        setConfigMessage("OCR bundle downloaded");
+      } catch (err) {
+        setConfigMessage(err.message || "ZIP bundle download failed", true);
+      }
       return;
     }
 
-    const suffix = (file.name.split(".").pop() || "").toLowerCase();
-    if (!["pdf", "png", "jpg", "jpeg"].includes(suffix)) {
-      setOcrError("Unsupported format. Use PDF, PNG, JPG, or JPEG.");
+    const files = ocrQueue.map((item) => item.file);
+    if (files.length === 0) {
+      setOcrError("Choose at least one document file");
       return;
     }
 
-    const formData = new FormData();
-    formData.append("file", file);
+    for (const file of files) {
+      const suffix = (file.name.split(".").pop() || "").toLowerCase();
+      if (!["pdf", "png", "jpg", "jpeg"].includes(suffix)) {
+        setOcrError(`Unsupported format for ${file.name}. Use PDF, PNG, JPG, or JPEG.`);
+        return;
+      }
+    }
+
     const method = ocrParseMethodEl.value || "fast";
     if (method === "precise") {
       setOcrError("Precise mode is not implemented yet");
       return;
     }
-    formData.append("parse_method", "auto");
 
-    const wantZip = ocrExtractImagesEl.checked;
-    if (wantZip) {
-      formData.append("extract_images", "true");
-    }
+    const wantZip = true;
 
-    ocrLiveEl.textContent = "";
-    ocrZipId = null;
-    ocrImageCount = 0;
+    // New extraction run starts a fresh queue/results snapshot.
+    ocrQueue = files.map((file, index) => ({
+      id: `${Date.now()}-${index}-${file.name}`,
+      name: file.name,
+      file,
+      status: "pending",
+      markdown: "",
+      zipId: null,
+      imageCount: 0,
+      error: "",
+    }));
+    ocrSelectedId = ocrQueue[0]?.id || null;
+
     setOcrError("");
     setOcrRunning(true);
+    ocrCancelRequested = false;
     updateOcrVisibility();
-    updateOcrStatus("Uploading file...");
+    updateOcrStatus(`Queued ${ocrQueue.length} file${ocrQueue.length > 1 ? "s" : ""}...`);
     ocrAbortController = new AbortController();
 
     try {
-      const response = await fetch("/api/ocr/parse", {
-        method: "POST",
-        body: formData,
-        signal: ocrAbortController.signal,
-      });
+      let done = 0;
+      let errors = 0;
+      let canceled = 0;
 
-      if (!response.ok) {
-        const payload = await response.json().catch(async () => ({ detail: await response.text() }));
-        throw new Error(payload.detail || `Request failed (${response.status})`);
+      for (let index = 0; index < ocrQueue.length; index += 1) {
+        const item = ocrQueue[index];
+        if (ocrCancelRequested) {
+          canceled += 1;
+          continue;
+        }
+
+        item.status = "processing";
+        ocrSelectedId = item.id;
+        updateOcrVisibility();
+        updateOcrStatus(`Processing ${index + 1}/${ocrQueue.length}: ${item.name}`);
+
+        const formData = new FormData();
+        formData.append("file", item.file);
+        formData.append("parse_method", "auto");
+        formData.append("extract_images", "true");
+
+        try {
+          const response = await fetch("/api/ocr/parse", {
+            method: "POST",
+            body: formData,
+            signal: ocrAbortController.signal,
+          });
+
+          if (!response.ok) {
+            const payload = await response.json().catch(async () => ({ detail: await response.text() }));
+            throw new Error(payload.detail || `Request failed (${response.status})`);
+          }
+
+          const data = await response.json();
+          const markdown = String(data.markdown || "");
+          if (!markdown.trim()) {
+            throw new Error("OCR completed but no markdown was returned");
+          }
+
+          item.markdown = markdown;
+          item.zipId = data.zip_id || null;
+          item.imageCount = Number(data.image_count || 0);
+          item.error = "";
+          item.status = "done";
+          done += 1;
+          updateOcrVisibility();
+        } catch (err) {
+          if (err.name === "AbortError") {
+            item.status = "canceled";
+            item.error = "Canceled";
+            canceled += 1;
+            ocrCancelRequested = true;
+          } else {
+            item.status = "error";
+            item.error = err.message || "OCR extraction failed";
+            errors += 1;
+          }
+          updateOcrVisibility();
+        }
       }
 
-      updateOcrStatus("Parsing document...");
-      const data = await response.json();
-      const markdown = String(data.markdown || "");
-      if (!markdown.trim()) {
-        throw new Error("OCR completed but no markdown was returned");
-      }
-
-      ocrLiveEl.textContent = markdown;
-      ocrLiveEl.dataset.sourceName = data.filename || file.name;
-
-      if (data.zip_id) {
-        ocrZipId = data.zip_id;
-      }
-      ocrImageCount = Number(data.image_count || 0);
-
-      updateOcrVisibility();
-      setConfigMessage(wantZip ? "OCR extraction finished — ZIP ready for download" : "OCR extraction finished");
+      const summary = `${done} done${errors ? `, ${errors} error` : ""}${canceled ? `, ${canceled} canceled` : ""}`;
+      setConfigMessage(summary, errors > 0);
     } catch (err) {
       const message = err.name === "AbortError" ? "OCR canceled" : err.message || "OCR extraction failed";
       setConfigMessage(message, true);
       setOcrError(message);
     } finally {
+      ocrCancelRequested = false;
       ocrAbortController = null;
       setOcrRunning(false);
+      updateOcrStatus("Idle");
+      updateOcrFileLabel();
       updateOcrVisibility();
     }
   });
 
   cancelOcrBtnEl.addEventListener("click", () => {
     if (ocrInFlight && ocrAbortController) {
+      ocrCancelRequested = true;
       ocrAbortController.abort();
     }
   });
 
   copyOcrBtnEl.addEventListener("click", async () => {
-    const text = ocrLiveEl.textContent || "";
+    const item = getSelectedOcrItem();
+    const text = item?.markdown || "";
     if (!text.trim()) {
       setConfigMessage("No OCR text to copy", true);
       return;
@@ -727,45 +1104,28 @@ function setupOcrUI() {
   });
 
   downloadOcrBtnEl.addEventListener("click", () => {
-    const text = ocrLiveEl.textContent || "";
+    const item = getSelectedOcrItem();
+    const text = item?.markdown || "";
     if (!text.trim()) {
       setConfigMessage("No OCR text to download", true);
       return;
     }
 
-    const sourceName = ocrLiveEl.dataset.sourceName || "ocr-output";
+    const sourceName = item?.name || "ocr-output";
     downloadMarkdownFile(sourceName, text);
     setConfigMessage("OCR markdown downloaded");
   });
 
   downloadOcrZipBtnEl.addEventListener("click", async () => {
-    if (!ocrZipId) {
+    const item = getSelectedOcrItem();
+    if (!item?.zipId) {
       setConfigMessage("No ZIP available", true);
       return;
     }
 
     try {
-      const response = await fetch(`/api/ocr/zip/${ocrZipId}`);
-      if (!response.ok) {
-        throw new Error("ZIP download failed");
-      }
+      await triggerZipDownload(item.zipId, `${item.name}.zip`);
 
-      const blob = await response.blob();
-      const disposition = response.headers.get("Content-Disposition") || "";
-      const match = disposition.match(/filename="?([^";\n]+)"?/);
-      const zipName = match ? match[1] : "ocr_output.zip";
-
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = zipName;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-
-      ocrZipId = null;
-      updateOcrVisibility();
       setConfigMessage("OCR ZIP downloaded");
     } catch (err) {
       setConfigMessage(err.message || "ZIP download failed", true);

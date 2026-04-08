@@ -106,47 +106,41 @@
           <p>Drop a PDF or an image and extract the content as markdown.</p>
         </div>
 
-        <form id="ocr-form" class="transcript-form">
-          <div class="transcript-form-row">
-            <label class="file-drop" for="ocr-file">
-              <input id="ocr-file" name="ocr-file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" required />
-              <span class="file-drop-label">Drop document file here or click to select</span>
-            </label>
-
-            <div class="transcript-controls">
-              <label>
-                <span>Method</span>
-                <select id="ocr-parse-method" name="parse-method">
-                  <option value="fast">Fast</option>
-                  <option value="precise" disabled>Precise (soon)</option>
-                </select>
+        <form id="ocr-form" class="transcript-form ocr-workspace">
+          <div class="ocr-left-stack">
+            <section class="ocr-left-card ocr-drop-card">
+              <label class="file-drop" for="ocr-file">
+                <input id="ocr-file" name="ocr-file" type="file" accept=".pdf,.png,.jpg,.jpeg,application/pdf,image/png,image/jpeg" multiple />
+                <span class="file-drop-label">Add documents [+]</span>
               </label>
+              <ul id="ocr-queue-list" class="ocr-queue-list"></ul>
+              <div class="ocr-drop-actions">
+                <button id="ocr-clear-btn" class="btn-secondary btn-small is-hidden" type="button">Clear</button>
+              </div>
+            </section>
 
-              <label class="checkbox-row">
-                <input id="ocr-extract-images" type="checkbox" name="extract-images" checked />
-                <span>Extract images (ZIP)</span>
-              </label>
+            <section class="ocr-left-card ocr-controls-card">
+              <div class="transcript-controls ocr-controls-layout">
+                <label>
+                  <span>Method</span>
+                  <select id="ocr-parse-method" name="parse-method">
+                    <option value="fast">Fast</option>
+                    <option value="precise" disabled>Precise (soon)</option>
+                  </select>
+                </label>
 
-              <button id="ocr-btn" type="submit">Extract OCR</button>
-            </div>
+                <div class="ocr-controls-actions">
+                  <button id="ocr-btn" type="submit">Extract text</button>
+                </div>
+              </div>
+            </section>
           </div>
-        </form>
 
-        <p id="ocr-error" class="transcript-error" aria-live="polite"></p>
-
-        <div id="ocr-overlay" class="panel-overlay is-hidden">
-          <div class="overlay-content">
-            <div class="spinner"></div>
-            <p id="ocr-status" class="overlay-status">Working...</p>
-            <button id="cancel-ocr-btn" class="btn-cancel" type="button">Cancel</button>
-          </div>
-        </div>
-
-        <div id="ocr-output-section" class="transcript-output-grid single is-hidden">
-          <article>
+          <div id="ocr-output-section" class="ocr-detail-col">
             <div class="transcript-output-header">
-              <h3>Markdown output</h3>
+              <h3 id="ocr-detail-filename">Markdown output</h3>
             </div>
+            <p id="ocr-detail-status" class="ocr-detail-status is-hidden"></p>
             <pre id="ocr-live" class="transcript-output"></pre>
             <p id="ocr-image-count" class="ocr-image-count is-hidden"></p>
             <div class="action-row ocr-actions-bottom">
@@ -154,8 +148,19 @@
               <button id="download-ocr-btn" class="btn-secondary btn-small" type="button">Download .md</button>
               <button id="download-ocr-zip-btn" class="btn-secondary btn-small is-hidden" type="button">Download .zip</button>
             </div>
-          </article>
-        </div>
+
+            <div id="ocr-overlay" class="panel-overlay is-hidden">
+              <div class="overlay-content">
+                <div class="spinner"></div>
+                <p id="ocr-status" class="overlay-status">Working...</p>
+                <button id="cancel-ocr-btn" class="btn-cancel" type="button">Cancel</button>
+              </div>
+            </div>
+          </div>
+        </form>
+
+        <p id="ocr-error" class="transcript-error" aria-live="polite"></p>
+
       </section>
     </main>
     <script src="/static/app.js" defer></script>

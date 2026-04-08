@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import shlex
 import signal
 import subprocess
 import time
+import zipfile
 from pathlib import Path
 from typing import Any, AsyncIterator
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Body, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -296,4 +298,44 @@ def download_ocr_zip(zip_id: str) -> StreamingResponse:
         iter([zip_bytes]),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{zip_name}"'},
+    )
+
+
+@app.post("/api/ocr/zip/bundle")
+def download_ocr_zip_bundle(payload: dict[str, Any] = Body(...)) -> StreamingResponse:
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="Missing zip bundle items")
+
+    bundle_buffer = io.BytesIO()
+    count = 0
+    with zipfile.ZipFile(bundle_buffer, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            zip_id = str(item.get("zip_id") or "").strip()
+            if not zip_id:
+                continue
+            entry = get_zip(zip_id)
+            if not entry:
+                continue
+
+            zip_bytes, zip_name = entry
+            file_name = str(item.get("file_name") or "").strip()
+            if file_name:
+                safe_name = f"{Path(file_name).stem}.zip"
+            else:
+                safe_name = zip_name
+            safe_name = Path(safe_name).name or f"ocr_{count + 1:04d}.zip"
+
+            bundle.writestr(safe_name, zip_bytes)
+            count += 1
+
+    if count == 0:
+        raise HTTPException(status_code=404, detail="No OCR ZIP entries available")
+
+    return StreamingResponse(
+        iter([bundle_buffer.getvalue()]),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="ocr_bundle.zip"'},
     )
