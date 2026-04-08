@@ -391,6 +391,31 @@ body {
   gap: 0.45rem;
 }
 
+.ocr-actions-bottom {
+  margin-top: 0.55rem;
+}
+
+.ocr-actions-bottom .btn-secondary {
+  min-width: 88px;
+  min-height: 30px;
+  padding: 7px 12px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.ocr-image-count {
+  margin: 0.45rem 0 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+}
+
+.ocr-image-count.is-hidden {
+  display: none;
+}
+
 .transcript-output {
   margin: 0;
   border: var(--border-size) solid var(--line);

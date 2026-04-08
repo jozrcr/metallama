@@ -29,6 +29,7 @@ const ocrStatusEl = document.getElementById("ocr-status");
 const cancelOcrBtnEl = document.getElementById("cancel-ocr-btn");
 const ocrErrorEl = document.getElementById("ocr-error");
 const ocrLiveEl = document.getElementById("ocr-live");
+const ocrImageCountEl = document.getElementById("ocr-image-count");
 const ocrOutputSectionEl = document.getElementById("ocr-output-section");
 const copyOcrBtnEl = document.getElementById("copy-ocr-btn");
 const downloadOcrBtnEl = document.getElementById("download-ocr-btn");
@@ -42,6 +43,7 @@ let ocrInFlight = false;
 let transcriptAbortController = null;
 let ocrAbortController = null;
 let ocrZipId = null;
+let ocrImageCount = 0;
 const cardErrors = new Map();
 
 function setCardError(modelId, message = "") {
@@ -417,6 +419,14 @@ function updateOcrVisibility() {
   const hasText = Boolean((ocrLiveEl.textContent || "").trim());
   ocrOutputSectionEl.classList.toggle("is-hidden", !hasText);
   downloadOcrZipBtnEl.classList.toggle("is-hidden", !ocrZipId);
+
+  if (ocrImageCount > 0) {
+    ocrImageCountEl.textContent = `${ocrImageCount} images extracted`;
+    ocrImageCountEl.classList.remove("is-hidden");
+  } else {
+    ocrImageCountEl.textContent = "";
+    ocrImageCountEl.classList.add("is-hidden");
+  }
 }
 
 function updateTranscriptVisibility() {
@@ -634,8 +644,12 @@ function setupOcrUI() {
 
     const formData = new FormData();
     formData.append("file", file);
-    formData.append("parse_method", ocrParseMethodEl.value || "auto");
-    formData.append("backend", "pipeline");
+    const method = ocrParseMethodEl.value || "fast";
+    if (method === "precise") {
+      setOcrError("Precise mode is not implemented yet");
+      return;
+    }
+    formData.append("parse_method", "auto");
 
     const wantZip = ocrExtractImagesEl.checked;
     if (wantZip) {
@@ -644,6 +658,7 @@ function setupOcrUI() {
 
     ocrLiveEl.textContent = "";
     ocrZipId = null;
+    ocrImageCount = 0;
     setOcrError("");
     setOcrRunning(true);
     updateOcrVisibility();
@@ -675,6 +690,7 @@ function setupOcrUI() {
       if (data.zip_id) {
         ocrZipId = data.zip_id;
       }
+      ocrImageCount = Number(data.image_count || 0);
 
       updateOcrVisibility();
       setConfigMessage(wantZip ? "OCR extraction finished — ZIP ready for download" : "OCR extraction finished");

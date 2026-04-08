@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shlex
 import socket
 import subprocess
@@ -18,6 +19,26 @@ from .profiles import MODEL_PROFILES
 
 runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
+
+
+def mineru_runtime_env() -> dict[str, str]:
+    env = os.environ.copy()
+
+    hf_home = Path(Config.MINERU_HF_HOME).expanduser()
+    hf_hub_cache = Path(Config.MINERU_HF_HUB_CACHE).expanduser()
+
+    for path in (hf_home, hf_hub_cache):
+        parent = path.parent
+        if not parent.exists():
+            raise HTTPException(
+                status_code=400,
+                detail=f"MinerU cache parent does not exist: {parent}",
+            )
+        path.mkdir(exist_ok=True)
+
+    env["HF_HOME"] = str(hf_home)
+    env["HUGGINGFACE_HUB_CACHE"] = str(hf_hub_cache)
+    return env
 
 
 def is_alive(proc: subprocess.Popen[str]) -> bool:

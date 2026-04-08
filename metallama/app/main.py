@@ -14,13 +14,14 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import STATIC_DIR, Config
 from .models import ProcessState
-from .ocr_utils import pop_zip, request_mineru_markdown, request_mineru_zip
+from .ocr_utils import get_zip, request_mineru_markdown, request_mineru_zip
 from .profiles import MODEL_PROFILES
 from .runtime import (
     build_command,
     cleanup_dead,
     is_alive,
     is_port_open,
+    mineru_runtime_env,
     model_locks,
     model_payload,
     runtime_processes,
@@ -51,6 +52,9 @@ def get_config() -> dict[str, str]:
         "EXECUTABLE_LLAMA": str(Config.EXECUTABLE_LLAMA),
         "EXECUTABLE_WHISPER": str(Config.EXECUTABLE_WHISPER),
         "EXECUTABLE_MINERU_VENV": str(Config.EXECUTABLE_MINERU_VENV),
+        "MINERU_BACKEND": str(Config.MINERU_BACKEND),
+        "MINERU_HF_HOME": str(Config.MINERU_HF_HOME),
+        "MINERU_HF_HUB_CACHE": str(Config.MINERU_HF_HUB_CACHE),
         "BASE_URL": str(Config.BASE_URL),
     }
 
@@ -78,11 +82,13 @@ async def start_model(model_id: str) -> dict[str, Any]:
 
         command = build_command(profile)
         try:
+            proc_env = mineru_runtime_env() if profile.engine == "mineru" else None
             proc = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 text=True,
+                env=proc_env,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=f"Binary not found: {command[0]}") from exc
@@ -246,7 +252,6 @@ async def transcript_stream(
 async def ocr_parse(
     file: UploadFile = File(...),
     parse_method: str = Form("auto"),
-    backend: str = Form("pipeline"),
     extract_images: bool = Form(False),
 ) -> Any:
     filename = file.filename or "document"
@@ -261,21 +266,21 @@ async def ocr_parse(
     content_type = file.content_type or "application/octet-stream"
 
     if extract_images:
-        markdown, zip_id = await request_mineru_zip(
+        markdown, zip_id, image_count = await request_mineru_zip(
             file_bytes=file_bytes,
             filename=filename,
             content_type=content_type,
             parse_method=parse_method,
-            backend=backend,
+            backend=Config.MINERU_BACKEND,
         )
-        return {"filename": filename, "markdown": markdown, "zip_id": zip_id}
+        return {"filename": filename, "markdown": markdown, "zip_id": zip_id, "image_count": image_count}
 
     markdown = await request_mineru_markdown(
         file_bytes=file_bytes,
         filename=filename,
         content_type=content_type,
         parse_method=parse_method,
-        backend=backend,
+        backend=Config.MINERU_BACKEND,
     )
 
     return {"filename": filename, "markdown": markdown}
@@ -283,9 +288,9 @@ async def ocr_parse(
 
 @app.get("/api/ocr/zip/{zip_id}")
 def download_ocr_zip(zip_id: str) -> StreamingResponse:
-    entry = pop_zip(zip_id)
+    entry = get_zip(zip_id)
     if not entry:
-        raise HTTPException(status_code=404, detail="ZIP not found or already downloaded")
+        raise HTTPException(status_code=404, detail="ZIP not found")
     zip_bytes, zip_name = entry
     return StreamingResponse(
         iter([zip_bytes]),

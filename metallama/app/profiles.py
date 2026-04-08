@@ -35,7 +35,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         size="Large",
         description="Advanced transcription model for diverse audio processing.",
         model_path="/local_home/debian/llm/whisper.cpp/models/ggml-large-v3-turbo.bin",
-        port=8013,
+        port=8012,
         extra_args=[],
     ),
     "mineru-ocr": ModelProfile(
@@ -47,7 +47,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
         size="N/A",
         description="OCR API server powered by mineru-api.",
         model_path="",
-        port=8014,
+        port=8013,
         extra_args=[],
     ),
 }

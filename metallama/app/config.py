@@ -14,6 +14,10 @@ class Config:
     EXECUTABLE_LLAMA = os.getenv("METALLAMA_LLAMACPP_BINARY", "")
     EXECUTABLE_WHISPER = os.getenv("METALLAMA_WHISPER_BINARY", "")
     EXECUTABLE_MINERU_VENV = os.getenv("METALLAMA_MINERU_VENV", "")
+    MINERU_BACKEND = os.getenv("METALLAMA_MINERU_BACKEND", "pipeline")
+    # Keep MinerU caches off the root filesystem.
+    MINERU_HF_HOME = os.getenv("METALLAMA_MINERU_HF_HOME")
+    MINERU_HF_HUB_CACHE = os.getenv("METALLAMA_MINERU_HF_HUB_CACHE")
     BASE_URL = os.getenv("METALLAMA_BASE_URL", "http://gpu4.hygeos.com")
 
 

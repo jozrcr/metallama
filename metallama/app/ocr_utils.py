@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import re
+from pathlib import Path
+from urllib.parse import quote, unquote
 import urllib.error
 import urllib.request
 import uuid
@@ -15,6 +18,7 @@ from .profiles import MODEL_PROFILES
 from .runtime import status_for
 
 _zip_store: dict[str, tuple[bytes, str]] = {}
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 
 
 def extract_first_markdown(payload: Any) -> str:
@@ -152,12 +156,13 @@ async def request_mineru_zip(
     content_type: str,
     parse_method: str,
     backend: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, int]:
     profile = _get_mineru_profile()
     request_filename = f"{uuid.uuid4().hex}_{filename}"
 
     form_fields = {
         "return_md": "true",
+        "return_images": "true",
         "response_format_zip": "true",
         "parse_method": parse_method or "auto",
         "backend": backend,
@@ -194,28 +199,147 @@ async def request_mineru_zip(
     if not raw:
         raise HTTPException(status_code=502, detail="MinerU returned empty response")
 
-    # Extract markdown from the ZIP
-    markdown = ""
-    try:
-        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-            for name in zf.namelist():
-                if name.endswith(".md"):
-                    markdown = zf.read(name).decode("utf-8", errors="ignore").strip()
-                    if markdown:
-                        break
-    except zipfile.BadZipFile:
-        pass
+    raw, image_count, markdown = _normalize_zip_layout(raw, Path(filename).stem)
 
     if not markdown:
         markdown = "(Images extracted — no markdown found in ZIP)"
 
-    from pathlib import Path
     stem = Path(filename).stem
     zip_id = uuid.uuid4().hex
     _zip_store[zip_id] = (raw, f"{stem}_ocr.zip")
 
-    return markdown, zip_id
+    return markdown, zip_id, image_count
 
 
-def pop_zip(zip_id: str) -> tuple[bytes, str] | None:
-    return _zip_store.pop(zip_id, None)
+def get_zip(zip_id: str) -> tuple[bytes, str] | None:
+    return _zip_store.get(zip_id)
+
+
+def _normalize_zip_layout(raw_zip: bytes, document_stem: str) -> tuple[bytes, int, str]:
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw_zip)) as source_zip:
+            members: list[tuple[str, bytes]] = [
+                (info.filename, source_zip.read(info.filename))
+                for info in source_zip.infolist()
+                if not info.is_dir()
+            ]
+    except zipfile.BadZipFile:
+        return raw_zip, 0, ""
+
+    markdown_entries = [(n.replace("\\", "/"), b) for n, b in members if n.lower().endswith(".md")]
+    if not markdown_entries:
+        return raw_zip, 0, ""
+
+    markdown_text = ""
+    for _, payload in markdown_entries:
+        candidate = payload.decode("utf-8", errors="ignore").strip()
+        if candidate:
+            markdown_text = candidate
+            break
+
+    if not markdown_text:
+        return raw_zip, 0, ""
+
+    image_entries: dict[str, bytes] = {}
+    image_by_base: dict[str, list[str]] = {}
+    for name, payload in members:
+        normalized = name.replace("\\", "/")
+        ext = Path(normalized).suffix.lower()
+        if ext not in IMAGE_EXTENSIONS:
+            continue
+        image_entries[normalized] = payload
+        base = Path(normalized).name
+        image_by_base.setdefault(base, []).append(normalized)
+
+    ordered_matches = _find_markdown_image_matches(markdown_text, image_entries, image_by_base)
+
+    image_map: dict[str, str] = {}
+    for index, old_path in enumerate(ordered_matches, start=1):
+        ext = Path(old_path).suffix.lower()
+        image_map[old_path] = f"images/img_{index:04d}{ext}"
+
+    normalized_markdown = _rewrite_markdown_image_refs(markdown_text, image_map)
+
+    safe_stem = Path(document_stem).name or "document"
+    updated_buffer = io.BytesIO()
+    with zipfile.ZipFile(updated_buffer, "w", compression=zipfile.ZIP_DEFLATED) as out_zip:
+        out_zip.writestr(f"{safe_stem}.md", normalized_markdown.encode("utf-8"))
+        for old_path in ordered_matches:
+            out_zip.writestr(image_map[old_path], image_entries[old_path])
+
+    return updated_buffer.getvalue(), len(ordered_matches), normalized_markdown
+
+
+def _find_markdown_image_matches(
+    markdown_text: str,
+    image_entries: dict[str, bytes],
+    image_by_base: dict[str, list[str]],
+) -> list[str]:
+    ordered_refs: list[str] = []
+
+    for match in re.finditer(r"!\[[^\]]*\]\(([^)]+)\)", markdown_text):
+        raw = match.group(1).strip().strip("<>").split()[0]
+        if raw:
+            ordered_refs.append(raw)
+
+    for match in re.finditer(r"<img[^>]+src=[\"']([^\"']+)[\"']", markdown_text, flags=re.IGNORECASE):
+        raw = match.group(1).strip()
+        if raw:
+            ordered_refs.append(raw)
+
+    ordered_matches: list[str] = []
+    seen: set[str] = set()
+    for ref in ordered_refs:
+        resolved = _resolve_image_ref(ref, image_entries, image_by_base)
+        if not resolved or resolved in seen:
+            continue
+        seen.add(resolved)
+        ordered_matches.append(resolved)
+
+    return ordered_matches
+
+
+def _resolve_image_ref(
+    ref: str,
+    image_entries: dict[str, bytes],
+    image_by_base: dict[str, list[str]],
+) -> str | None:
+    cleaned = ref.split("?")[0].split("#")[0]
+    candidates = {
+        cleaned,
+        cleaned.lstrip("./"),
+        unquote(cleaned),
+        unquote(cleaned).lstrip("./"),
+    }
+
+    for candidate in list(candidates):
+        candidates.add(candidate.replace("\\", "/"))
+
+    for candidate in candidates:
+        if candidate in image_entries:
+            return candidate
+
+    for candidate in candidates:
+        base = Path(candidate).name
+        hits = image_by_base.get(base, [])
+        if len(hits) == 1:
+            return hits[0]
+
+    return None
+
+
+def _rewrite_markdown_image_refs(markdown_text: str, image_map: dict[str, str]) -> str:
+    updated = markdown_text
+    replacement_items = sorted(image_map.items(), key=lambda item: len(item[0]), reverse=True)
+
+    for old_path, new_path in replacement_items:
+        old_base = Path(old_path).name
+        new_base = Path(new_path).name
+
+        updated = updated.replace(old_path, new_path)
+        updated = updated.replace(quote(old_path), quote(new_path))
+
+        updated = updated.replace(old_base, new_base)
+        updated = updated.replace(quote(old_base), quote(new_base))
+
+    return updated

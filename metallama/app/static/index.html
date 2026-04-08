@@ -115,14 +115,15 @@
 
             <div class="transcript-controls">
               <label>
-                <span>Parse method</span>
+                <span>Method</span>
                 <select id="ocr-parse-method" name="parse-method">
-                  <option value="auto">auto</option>
+                  <option value="fast">Fast</option>
+                  <option value="precise" disabled>Precise (soon)</option>
                 </select>
               </label>
 
               <label class="checkbox-row">
-                <input id="ocr-extract-images" type="checkbox" name="extract-images" />
+                <input id="ocr-extract-images" type="checkbox" name="extract-images" checked />
                 <span>Extract images (ZIP)</span>
               </label>
 
@@ -145,13 +146,14 @@
           <article>
             <div class="transcript-output-header">
               <h3>Markdown output</h3>
-              <div class="action-row">
-                <button id="copy-ocr-btn" class="btn-secondary btn-small" type="button">Copy</button>
-                <button id="download-ocr-btn" class="btn-secondary btn-small" type="button">Download .md</button>
-                <button id="download-ocr-zip-btn" class="btn-secondary btn-small is-hidden" type="button">Download .zip</button>
-              </div>
             </div>
             <pre id="ocr-live" class="transcript-output"></pre>
+            <p id="ocr-image-count" class="ocr-image-count is-hidden"></p>
+            <div class="action-row ocr-actions-bottom">
+              <button id="copy-ocr-btn" class="btn-secondary btn-small" type="button">Copy</button>
+              <button id="download-ocr-btn" class="btn-secondary btn-small" type="button">Download .md</button>
+              <button id="download-ocr-zip-btn" class="btn-secondary btn-small is-hidden" type="button">Download .zip</button>
+            </div>
           </article>
         </div>
       </section>
