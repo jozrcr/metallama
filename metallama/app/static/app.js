@@ -3,6 +3,7 @@ const uiMessageEl = document.getElementById("ui-message");
 const summaryEl = document.getElementById("summary");
 const themeButtons = document.querySelectorAll(".theme-btn");
 const heroLogoEl = document.getElementById("hero-logo");
+const vramStatusEl = document.getElementById("vram-status");
 const transcriptFormEl = document.getElementById("transcript-form");
 const audioFileEl = document.getElementById("audio-file");
 const fileLabelEl = document.querySelector(".service-audio .file-drop-label");
@@ -345,9 +346,32 @@ async function init() {
   setupTranscriptUI();
   setupOcrUI();
   await refreshModels();
+  await refreshVram();
   setInterval(() => {
     refreshModels().catch(() => {});
   }, 2000);
+  setInterval(() => {
+    refreshVram().catch(() => {});
+  }, 3000);
+}
+
+async function refreshVram() {
+  try {
+    const data = await api("/api/system/vram");
+    if (!data.available || !data.gpus || data.gpus.length === 0) {
+      vramStatusEl.textContent = "VRAM: N/A";
+      return;
+    }
+    
+    // Show total across all GPUs
+    const totalUsed = data.gpus.reduce((sum, gpu) => sum + gpu.used_gb, 0);
+    const totalMax = data.gpus.reduce((sum, gpu) => sum + gpu.total_gb, 0);
+    const avgPercent = data.gpus.reduce((sum, gpu) => sum + gpu.percent, 0) / data.gpus.length;
+    
+    vramStatusEl.textContent = `VRAM: ${totalUsed.toFixed(1)} GB / ${totalMax.toFixed(1)} GB (${avgPercent.toFixed(0)}%)`;
+  } catch (err) {
+    vramStatusEl.textContent = "VRAM: --";
+  }
 }
 
 function updateTranscriptStatus(statusText) {

@@ -118,6 +118,46 @@ def get_config() -> dict[str, str]:
     }
 
 
+@app.get("/api/system/vram")
+def get_vram_status() -> dict[str, Any]:
+    """Get current VRAM usage from nvidia-smi."""
+    try:
+        result = subprocess.run(
+            ["/usr/bin/nvidia-smi", "--query-gpu=memory.used,memory.total", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            return {"error": "nvidia-smi failed", "available": False}
+        
+        # Parse output: "used, total" (in MiB)
+        lines = result.stdout.strip().split("\n")
+        gpus = []
+        for line in lines:
+            if not line.strip():
+                continue
+            parts = line.split(",")
+            if len(parts) >= 2:
+                used_mb = float(parts[0].strip())
+                total_mb = float(parts[1].strip())
+                gpus.append({
+                    "used_gb": round(used_mb / 1024, 2),
+                    "total_gb": round(total_mb / 1024, 2),
+                    "used_mb": int(used_mb),
+                    "total_mb": int(total_mb),
+                    "percent": round((used_mb / total_mb * 100) if total_mb > 0 else 0, 1),
+                })
+        
+        return {"available": True, "gpus": gpus}
+    except FileNotFoundError:
+        return {"error": "nvidia-smi not found", "available": False}
+    except subprocess.TimeoutExpired:
+        return {"error": "nvidia-smi timeout", "available": False}
+    except Exception as exc:
+        return {"error": str(exc), "available": False}
+
+
 @app.get("/api/models")
 def list_models() -> dict[str, Any]:
     return {"models": [model_payload(profile) for profile in MODEL_PROFILES.values()]}

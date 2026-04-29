@@ -24,6 +24,8 @@
   --ocr-file-processing: #F4A501;
   --ocr-file-done: #8EC561;
   --ocr-file-error: #dc2626;
+  --footer-bg: #f9fafb;
+  --footer-text: #6b7280;
 }
 
 :root[data-theme="dark"] {
@@ -47,6 +49,8 @@
   --ocr-file-processing: #F4A501;
   --ocr-file-done: #8EC561;
   --ocr-file-error: #ef4444;
+  --footer-bg: #18181b;
+  --footer-text: #a3a3a3;
 }
 
 body {
@@ -985,4 +989,33 @@ button:disabled {
 .btn-small {
   padding: 0.2rem 0.45rem;
   font-size: 9px;
+}
+
+/* ── Footer ─────────────────────────────────────────────── */
+.app-footer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--footer-bg);
+  border-top: var(--border-size) solid var(--line);
+  padding: 0.5rem 1.5rem;
+  z-index: 100;
+}
+
+.footer-content {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+}
+
+.vram-status {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--footer-text);
+  font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas, 'DejaVu Sans Mono', monospace;
+  letter-spacing: 0.02em;
 }
