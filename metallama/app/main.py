@@ -8,6 +8,7 @@ import signal
 import subprocess
 import time
 import zipfile
+from collections import deque
 from pathlib import Path
 from typing import Any, AsyncIterator
 
@@ -42,6 +43,11 @@ app = FastAPI(title="metallama")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 transcript_semaphore = asyncio.Semaphore(1)
+
+# Server-side history storage (500 samples at 1s = ~8 minutes)
+MAX_HISTORY_SAMPLES = 500
+vram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
+ram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 
 
 def server_profiles(service: str | None = None) -> dict[str, Any]:
@@ -149,6 +155,18 @@ def get_vram_status() -> dict[str, Any]:
                     "percent": round((used_mb / total_mb * 100) if total_mb > 0 else 0, 1),
                 })
         
+        # Store in history (aggregate across GPUs)
+        if gpus:
+            total_used = sum(gpu["used_gb"] for gpu in gpus)
+            total_max = sum(gpu["total_gb"] for gpu in gpus)
+            avg_percent = sum(gpu["percent"] for gpu in gpus) / len(gpus)
+            vram_history.append({
+                "timestamp": int(time.time() * 1000),
+                "percent": round(avg_percent, 1),
+                "used_gb": round(total_used, 2),
+                "total_gb": round(total_max, 2),
+            })
+        
         return {"available": True, "gpus": gpus}
     except FileNotFoundError:
         return {"error": "nvidia-smi not found", "available": False}
@@ -164,16 +182,40 @@ def get_ram_status() -> dict[str, Any]:
     try:
         import psutil
         mem = psutil.virtual_memory()
+        used_gb = round(mem.used / (1024**3), 2)
+        total_gb = round(mem.total / (1024**3), 2)
+        percent = round(mem.percent, 1)
+        
+        # Store in history
+        ram_history.append({
+            "timestamp": int(time.time() * 1000),
+            "percent": percent,
+            "used_gb": used_gb,
+            "total_gb": total_gb,
+        })
+        
         return {
             "available": True,
-            "used_gb": round(mem.used / (1024**3), 2),
-            "total_gb": round(mem.total / (1024**3), 2),
-            "percent": round(mem.percent, 1),
+            "used_gb": used_gb,
+            "total_gb": total_gb,
+            "percent": percent,
         }
     except ImportError:
         return {"error": "psutil not installed", "available": False}
     except Exception as exc:
         return {"error": str(exc), "available": False}
+
+
+@app.get("/api/system/vram/history")
+def get_vram_history() -> dict[str, Any]:
+    """Get VRAM usage history."""
+    return {"history": list(vram_history)}
+
+
+@app.get("/api/system/ram/history")
+def get_ram_history() -> dict[str, Any]:
+    """Get RAM usage history."""
+    return {"history": list(ram_history)}
 
 
 @app.get("/api/models")
