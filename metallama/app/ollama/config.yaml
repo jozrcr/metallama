@@ -1,0 +1,9 @@
+subservers:
+  - name: "Qwen3.6:27b"
+    url: "http://gpu4.hygeos.com:8080"
+
+  - name: "gpt-oss:20b"
+    url: "http://llm.hygeos.com:8080"
+
+  - name: "Qwen3.6:35B-A3B"
+    url: "http://gpu4.hygeos.com:8081"

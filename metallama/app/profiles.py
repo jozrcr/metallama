@@ -36,6 +36,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
             "--reasoning-budget 1536",  # rather big reasoning budget
         ],
         context_window=get_server_config("llamacpp-coding").get("context_window"),
+        parallel=get_server_config("llamacpp-coding").get("parallel") or 4,
     ),
     "llamacpp-coding-small": ModelProfile(
         id="llamacpp-coding-small",
@@ -62,6 +63,7 @@ MODEL_PROFILES: dict[str, ModelProfile] = {
             "--reasoning-budget 768",  # rather small reasoning budget
         ],
         context_window=get_server_config("llamacpp-coding-small").get("context_window"),
+        parallel=get_server_config("llamacpp-coding-small").get("parallel") or 4,
     ),
     "whisper-audio": ModelProfile(
         id="whisper-audio",

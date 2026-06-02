@@ -890,7 +890,8 @@ body {
 }
 
 /* ── Context Window Inline Input ──────────────────────── */
-.ctx-inline-input {
+.ctx-inline-input,
+.par-inline-input {
   width: 40px;
   padding: 0.1rem 0.2rem;
   border: var(--border-size) solid var(--line);
@@ -903,24 +904,29 @@ body {
   border-radius: 2px;
 }
 
-.ctx-inline-input:focus {
+.ctx-inline-input:focus,
+.par-inline-input:focus {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 
-.ctx-inline-input::placeholder {
+.ctx-inline-input::placeholder,
+.par-inline-input::placeholder {
   color: var(--muted);
   opacity: 0.6;
 }
 
 /* Remove spinner arrows from number input */
 .ctx-inline-input::-webkit-outer-spin-button,
-.ctx-inline-input::-webkit-inner-spin-button {
+.ctx-inline-input::-webkit-inner-spin-button,
+.par-inline-input::-webkit-outer-spin-button,
+.par-inline-input::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
 
-.ctx-inline-input[type=number] {
+.ctx-inline-input[type=number],
+.par-inline-input[type=number] {
   -moz-appearance: textfield;
   appearance: textfield;
 }

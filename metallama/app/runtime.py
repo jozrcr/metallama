@@ -32,14 +32,19 @@ ENGINE_DEFAULT_ARGS: dict[str, list[str]] = {
 
 
 def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
-    """Get a profile with the latest context_window from server_configs.json."""
+    """Get a profile with the latest ui-configurable params from server_configs.json."""
     config = get_server_config(profile.id)
+    overrides: dict = {}
+
     context_window = config.get("context_window")
-    
     if context_window is not None and context_window != profile.context_window:
-        return replace(profile, context_window=context_window)
-    
-    return profile
+        overrides["context_window"] = context_window
+
+    parallel = config.get("parallel")
+    if parallel is not None and parallel != profile.parallel:
+        overrides["parallel"] = parallel
+
+    return replace(profile, **overrides) if overrides else profile
 
 
 def mineru_runtime_env() -> dict[str, str]:
@@ -146,7 +151,12 @@ def build_command(profile: ModelProfile) -> list[str]:
 
     if profile.engine == "llama" and profile.context_window is not None:
         extra_args = _strip_flag(extra_args, "--ctx-size")
-        extra_args += ["--ctx-size", str(profile.context_window)]
+        total_ctx = profile.context_window * profile.parallel
+        extra_args += ["--ctx-size", str(total_ctx)]
+
+    if profile.engine == "llama" and profile.parallel is not None:
+        extra_args = _strip_flag(extra_args, "--parallel")
+        extra_args += ["--parallel", str(profile.parallel)]
 
     if profile.engine == "mineru":
         return [binary, "--host", "0.0.0.0", "--port", str(profile.port), *extra_args]
@@ -195,4 +205,5 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "status": status,
         "pid": state.process.pid if state and status == "running" else None,
         "context_window": profile.context_window,
+        "parallel": profile.parallel,
     }

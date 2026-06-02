@@ -18,6 +18,7 @@ class ModelProfile:
     port: int
     extra_args: list[str]
     context_window: int | None = None
+    parallel: int = 1
 
 
 @dataclass

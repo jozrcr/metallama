@@ -64,6 +64,7 @@ function cardTemplate(model) {
   const isStopped = model.status === "stopped";
   const ctxValue = model.context_window || "";
   const ctxKTokens = ctxValue ? Math.round(ctxValue / 1000) : "";
+  const parValue = model.parallel || "";
   const ctxDisplay =
     isLLM
       ? isStopped
@@ -81,9 +82,23 @@ function cardTemplate(model) {
         title="Context window in k tokens (editable when stopped)"
       />k
     </span>
+    <span class="info-item ctx-editable" data-model-id="${model.id}">
+      PAR: <input
+        type="number"
+        class="par-inline-input"
+        data-model-id="${model.id}"
+        data-original-value="${parValue}"
+        value="${parValue}"
+        min="1"
+        step="1"
+        placeholder="Auto"
+        title="Parallel slots (--parallel, editable when stopped)"
+      />
+    </span>
   `
         : `
     <span class="info-item">CTX: ${ctxKTokens}k</span>
+    ${parValue ? `<span class="info-item">PAR: ${parValue}</span>` : ""}
   `
       : "";
 
@@ -144,7 +159,7 @@ function renderModels(models) {
 
 export async function refreshModels() {
   const activeElement = document.activeElement;
-  if (activeElement && activeElement.classList?.contains("ctx-inline-input")) {
+  if (activeElement && (activeElement.classList?.contains("ctx-inline-input") || activeElement.classList?.contains("par-inline-input"))) {
     return;
   }
 
@@ -263,49 +278,52 @@ export function setupModels() {
     "blur",
     async (event) => {
       const target = event.target;
-      if (!(target instanceof HTMLInputElement) || !target.classList.contains("ctx-inline-input")) {
+      if (!(target instanceof HTMLInputElement)) return;
+
+      if (target.classList.contains("ctx-inline-input")) {
+        const modelId = target.dataset.modelId;
+        const kTokens = parseInt(target.value, 10);
+        if (!modelId || isNaN(kTokens) || kTokens < 1) return;
+        try {
+          await api(`/api/models/${modelId}/config`, {
+            method: "POST",
+            body: JSON.stringify({ context_window: kTokens * 1000 }),
+          });
+          target.dataset.originalValue = String(kTokens * 1000);
+          setConfigMessage("Context window updated");
+        } catch (err) {
+          setCardError(modelId, `Failed to save context: ${err.message}`);
+        }
+        setTimeout(() => { refreshModels().catch(() => {}); }, 100);
         return;
       }
 
-      const modelId = target.dataset.modelId;
-      const kTokens = parseInt(target.value, 10);
-
-      if (!modelId || isNaN(kTokens) || kTokens < 1) {
+      if (target.classList.contains("par-inline-input")) {
+        const modelId = target.dataset.modelId;
+        const val = parseInt(target.value, 10);
+        if (!modelId || isNaN(val) || val < 1) return;
+        try {
+          await api(`/api/models/${modelId}/config`, {
+            method: "POST",
+            body: JSON.stringify({ parallel: val }),
+          });
+          target.dataset.originalValue = String(val);
+          setConfigMessage("Parallel slots updated");
+        } catch (err) {
+          setCardError(modelId, `Failed to save parallel: ${err.message}`);
+        }
+        setTimeout(() => { refreshModels().catch(() => {}); }, 100);
         return;
-      }
-
-      const newValue = kTokens * 1000;
-
-      try {
-        await api(`/api/models/${modelId}/config`, {
-          method: "POST",
-          body: JSON.stringify({ context_window: newValue }),
-        });
-        target.dataset.originalValue = String(newValue);
-        setConfigMessage("Context window updated");
-        setTimeout(() => {
-          refreshModels().catch(() => {});
-        }, 100);
-      } catch (err) {
-        setCardError(modelId, `Failed to save context: ${err.message}`);
-        setTimeout(() => {
-          refreshModels().catch(() => {});
-        }, 100);
       }
     },
     true,
   );
 
   modelsEl.addEventListener("keydown", (event) => {
-    if (event.key !== "Enter") {
-      return;
-    }
-
+    if (event.key !== "Enter") return;
     const target = event.target;
-    if (!(target instanceof HTMLInputElement) || !target.classList.contains("ctx-inline-input")) {
-      return;
-    }
-
+    if (!(target instanceof HTMLInputElement)) return;
+    if (!target.classList.contains("ctx-inline-input") && !target.classList.contains("par-inline-input")) return;
     event.preventDefault();
     target.blur();
   });

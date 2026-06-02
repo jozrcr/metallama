@@ -19,6 +19,11 @@ from fastapi.staticfiles import StaticFiles
 from .config import PROJECT_ROOT, STATIC_DIR, Config
 from .models import ProcessState
 from .ocr_utils import get_zip, request_mineru_markdown, request_mineru_zip
+from .ollama.config import load_config as load_ollama_config
+from .ollama.probe import probe_subservers
+from .ollama.registry import init_registry as init_ollama_registry
+from .ollama.routes.ollama import router as ollama_router
+from .ollama.routes.openai import router as openai_router
 from .profiles import MODEL_PROFILES
 from .runtime import (
     build_command,
@@ -41,6 +46,15 @@ from .transcript_utils import (
 
 app = FastAPI(title="metallama")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# ---------------------------------------------------------------------------
+# Ollama / OpenAI gateway (mounted at /ollama)
+# ---------------------------------------------------------------------------
+
+_ollama_cfg = load_ollama_config()
+init_ollama_registry(_ollama_cfg)
+app.include_router(ollama_router, prefix="/ollama")
+app.include_router(openai_router, prefix="/ollama")
 
 transcript_semaphore = asyncio.Semaphore(1)
 
@@ -378,6 +392,11 @@ def model_status(model_id: str) -> dict[str, Any]:
     return model_payload(profile)
 
 
+@app.on_event("startup")
+async def probe_ollama_subservers() -> None:
+    await probe_subservers()
+
+
 @app.on_event("shutdown")
 def stop_all_on_shutdown() -> None:
     for model_id, state in list(runtime_processes.items()):
@@ -416,8 +435,14 @@ async def update_model_config(model_id: str, payload: dict[str, Any] = Body(...)
         context_window = payload["context_window"]
         if not isinstance(context_window, int) or context_window < 1:
             raise HTTPException(status_code=400, detail="context_window must be a positive integer")
-        
         update_server_config(model_id, {"context_window": context_window})
+
+    # Validate and update parallel if provided
+    if "parallel" in payload:
+        parallel = payload["parallel"]
+        if not isinstance(parallel, int) or parallel < 1:
+            raise HTTPException(status_code=400, detail="parallel must be a positive integer")
+        update_server_config(model_id, {"parallel": parallel})
     
     # Return updated config
     updated_config = get_server_config(model_id)
