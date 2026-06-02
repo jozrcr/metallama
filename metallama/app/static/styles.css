@@ -1053,6 +1053,47 @@ button:disabled {
   color: var(--panel);
 }
 
+.info-banner {
+  margin-bottom: 1.2rem;
+  padding: 0.75rem 1rem;
+  border: var(--border-size) solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+}
+
+.info-banner-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.2rem;
+}
+
+.info-banner-block {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font-size: 0.82rem;
+}
+
+.info-banner-label {
+  font-family: ui-monospace, monospace;
+  font-weight: 700;
+  font-size: 0.78rem;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.info-banner-url {
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+  user-select: all;
+}
+
+.info-banner-desc {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .ui-message {
   height: 1.5rem;
   font-weight: 800;
