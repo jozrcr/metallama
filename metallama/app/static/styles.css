@@ -524,9 +524,9 @@ body {
   padding: 0;
 }
 
-.status-badge.running { color: var(--green); }
-.status-badge.stopped { color: var(--red); }
-.status-badge.remote { color: #8B5CF6; }
+.status-badge.online { color: var(--green); }
+.status-badge.offline { color: var(--red); }
+.status-badge.starting { color: var(--yellow, #f59e0b); }
 
 .btn-action-start {
   background: color-mix(in srgb, #8EC561 18%, var(--panel));
@@ -783,6 +783,10 @@ button:disabled {
   color: var(--text);
   font-size: 0.9rem;
   font-family: ui-monospace, monospace;
+}
+.modal-body input[readonly] {
+  opacity: 0.5;
+  cursor: default;
 }
 .modal-body textarea {
   resize: vertical;

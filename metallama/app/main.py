@@ -173,26 +173,32 @@ def get_ram_history() -> dict[str, Any]:
 
 
 @app.get("/api/models")
-def list_models() -> dict[str, Any]:
+async def list_models() -> dict[str, Any]:
     from .unified_config import load_unified_config
+    from .ollama.probe import probe_one
+    from .ollama.schemas import SubserverConfig
+    import httpx
+
     managed = [model_payload(profile) for profile in MODEL_PROFILES.values()]
     cfg = load_unified_config()
-    remote = [
-        {
-            "id": srv.name,
-            "display_name": srv.name,
-            "url": srv.url,
-            "status": "remote",
-            "managed": False,
-            "port": None,
-            "pid": None,
-            "context_window": srv.context_length,
-            "parallel": None,
-            "extra_args": [],
-            "model_found": True,
-        }
-        for srv in cfg.remote_servers
-    ]
+    remote = []
+    async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
+        for srv_cfg in cfg.remote_servers:
+            srv = SubserverConfig(name=srv_cfg.name, url=srv_cfg.url, context_length=srv_cfg.context_length)
+            await probe_one(srv, client)
+            remote.append({
+                "id": srv_cfg.name,
+                "display_name": srv_cfg.name,
+                "url": srv_cfg.url,
+                "status": "online" if srv.reachable else "offline",
+                "managed": False,
+                "port": None,
+                "pid": None,
+                "context_window": srv.context_length,
+                "parallel": None,
+                "extra_args": [],
+                "model_found": True,
+            })
     return {"models": managed + remote}
 
 
@@ -446,4 +452,32 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
             "extra_args": server_entry.extra_args,
         } if server_entry else {},
     }
+
+
+@app.post("/api/remote-servers/{server_name}/config")
+async def update_remote_server_config(server_name: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    from .unified_config import update_remote_server, load_unified_config
+
+    cfg = load_unified_config()
+    if not any(s.name == server_name for s in cfg.remote_servers):
+        raise HTTPException(status_code=404, detail="Unknown remote server")
+
+    updates: dict[str, Any] = {}
+    if "name" in payload:
+        new_name = payload["name"]
+        if not isinstance(new_name, str) or not new_name.strip():
+            raise HTTPException(status_code=400, detail="name must be a non-empty string")
+        updates["name"] = new_name.strip()
+    if "url" in payload:
+        url = payload["url"]
+        if not isinstance(url, str) or not url.strip():
+            raise HTTPException(status_code=400, detail="url must be a non-empty string")
+        updates["url"] = url.strip()
+
+    if updates:
+        update_remote_server(server_name, updates)
+
+    unified = load_unified_config()
+    entry = next((s for s in unified.remote_servers if s.name == (updates.get("name") or server_name)), None)
+    return {"ok": True, "config": {"name": entry.name, "url": entry.url} if entry else {}}
 

@@ -145,6 +145,20 @@ def update_managed_server(server_id: str, updates: dict[str, Any], path: str | P
     raise ValueError(f"Managed server '{server_id}' not found in config")
 
 
+def update_remote_server(server_id: str, updates: dict[str, Any], path: str | Path = "config.yaml") -> None:
+    """Update fields on a remote_server entry in config.yaml."""
+    config = load_unified_config(path)
+    for i, server in enumerate(config.remote_servers):
+        if server.name == server_id:
+            for key, value in updates.items():
+                if hasattr(server, key):
+                    setattr(server, key, value)
+            config.remote_servers[i] = server
+            save_unified_config(config, path)
+            return
+    raise ValueError(f"Remote server '{server_id}' not found in config")
+
+
 def _yaml_str_value(value: Any) -> str:
     """Format a single value as a YAML scalar (quote strings that need it)."""
     if value is None:

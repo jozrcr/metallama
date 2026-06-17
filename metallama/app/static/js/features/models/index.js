@@ -10,21 +10,38 @@ const cardErrors = new Map();
 
 // ── Edit Modal State ──────────────────────────────────────
 let editingModelId = null;
+let editingIsManaged = true;
 
-function openEditModal(modelId) {
+function setManagedOnlyVisible(visible) {
+  document.querySelectorAll(".managed-only").forEach((el) => {
+    el.classList.toggle("is-hidden", !visible);
+  });
+}
+
+function openEditModal(modelId, isManaged) {
   const model = (async () => {
-    const data = await api(`/api/models/${modelId}/status`);
-    return data;
+    if (isManaged) {
+      return await api(`/api/models/${modelId}/status`);
+    }
+    // For remote servers, build data from the card directly
+    const data = await api("/api/models");
+    return (data.models || []).find((m) => m.id === modelId) || {};
   })();
 
   model.then((data) => {
     editingModelId = modelId;
+    editingIsManaged = isManaged;
+    setManagedOnlyVisible(isManaged);
     document.getElementById("modal-title").textContent = `Edit: ${data.display_name || data.id}`;
     document.getElementById("edit-name").value = data.display_name || data.id || "";
-    document.getElementById("edit-port").value = data.port || "";
-    document.getElementById("edit-context-window").value = data.context_window || "";
-    document.getElementById("edit-parallel").value = data.parallel || "";
-    document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
+    document.getElementById("edit-url").value = data.url || "";
+    document.getElementById("edit-url").readOnly = isManaged;
+    if (isManaged) {
+      document.getElementById("edit-port").value = data.port || "";
+      document.getElementById("edit-context-window").value = data.context_window || "";
+      document.getElementById("edit-parallel").value = data.parallel || "";
+      document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
+    }
     document.getElementById("edit-modal").classList.remove("is-hidden");
   });
 }
@@ -36,36 +53,58 @@ function closeEditModal() {
 
 async function saveEditModal() {
   if (!editingModelId) return;
-  const payload = {
-    name: document.getElementById("edit-name").value.trim(),
-    port: parseInt(document.getElementById("edit-port").value, 10),
-    context_window: parseInt(document.getElementById("edit-context-window").value, 10),
-    parallel: parseInt(document.getElementById("edit-parallel").value, 10),
-    extra_args: document.getElementById("edit-extra-args").value
-      .split("\n")
-      .map((s) => s.trim())
-      .filter(Boolean),
-  };
 
-  // Remove undefined/NaN values
-  Object.keys(payload).forEach((key) => {
-    if (key === "extra_args" || key === "name") return;
-    if (isNaN(payload[key])) delete payload[key];
-  });
-  if (payload.name === "") delete payload.name;
+  const newName = document.getElementById("edit-name").value.trim();
+  const newUrl = document.getElementById("edit-url").value.trim();
 
-  try {
-    setCardError(editingModelId, "");
-    await api(`/api/models/${editingModelId}/config`, {
-      method: "POST",
-      body: JSON.stringify(payload),
+  if (editingIsManaged) {
+    const payload = {
+      name: newName,
+      port: parseInt(document.getElementById("edit-port").value, 10),
+      context_window: parseInt(document.getElementById("edit-context-window").value, 10),
+      parallel: parseInt(document.getElementById("edit-parallel").value, 10),
+      extra_args: document.getElementById("edit-extra-args").value
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    };
+    Object.keys(payload).forEach((key) => {
+      if (key === "extra_args" || key === "name") return;
+      if (isNaN(payload[key])) delete payload[key];
     });
-    setConfigMessage("Config updated");
-    closeEditModal();
-    await refreshModels();
-  } catch (err) {
-    setCardError(editingModelId, err.message);
-    setConfigMessage(err.message, true);
+    if (payload.name === "") delete payload.name;
+
+    try {
+      setCardError(editingModelId, "");
+      await api(`/api/models/${editingModelId}/config`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setConfigMessage("Config updated");
+      closeEditModal();
+      await refreshModels();
+    } catch (err) {
+      setCardError(editingModelId, err.message);
+      setConfigMessage(err.message, true);
+    }
+  } else {
+    const payload = {};
+    if (newName) payload.name = newName;
+    if (newUrl) payload.url = newUrl;
+
+    try {
+      setCardError(editingModelId, "");
+      await api(`/api/remote-servers/${encodeURIComponent(editingModelId)}/config`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setConfigMessage("Config updated");
+      closeEditModal();
+      await refreshModels();
+    } catch (err) {
+      setCardError(editingModelId, err.message);
+      setConfigMessage(err.message, true);
+    }
   }
 }
 
@@ -82,11 +121,11 @@ function setCardError(modelId, message = "") {
 }
 
 function canStart(model) {
-  return model.status === "stopped" && !inFlight.has(model.id);
+  return model.status === "offline" && !inFlight.has(model.id);
 }
 
 function canStop(model) {
-  return model.status === "running" && !inFlight.has(model.id);
+  return model.status === "online" && !inFlight.has(model.id);
 }
 
 function modelTypeLabel(model) {
@@ -101,7 +140,7 @@ function cardAccentColor(managed) {
 
 function cardTemplate(model) {
   const isManaged = model.managed !== false;
-  const action = model.status === "running" ? "stop" : "start";
+  const action = model.status === "online" ? "stop" : "start";
   const label = action === "stop" ? "Stop" : "Start";
   const canRunAction = action === "stop" ? canStop(model) : canStart(model);
   const type = modelTypeLabel(model);
@@ -125,7 +164,7 @@ function cardTemplate(model) {
       : "";
 
   const modelWarning = model.model_found === false
-    ? `<p class="model-not-found-warning">⚠ Model weights not found — server cannot start</p>`
+    ? `<p class="model-not-found-warning">Model weights not found locally</p>`
     : "";
 
   return `
@@ -145,11 +184,10 @@ function cardTemplate(model) {
           </div>
 
           <div class="info-row">
-            ${model.port ? `<span class="info-item">PORT: ${model.port}</span>` : ""}
-            ${isManaged ? `<span class="info-item">PID: ${model.pid ?? "-"}</span>` : ""}
+            ${isManaged && model.pid !== undefined ? `<span class="info-item">PID: ${model.pid ?? "-"}</span>` : ""}
             ${ctxDisplay}
             ${isManaged ? `<button class="btn-secondary btn-small" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>` : ""}
-            ${isManaged ? `<button class="btn-secondary btn-small" data-id="${model.id}" data-action="edit" title="Edit server config">Edit</button>` : ""}
+            <button class="btn-secondary btn-small" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">Edit</button>
           </div>
         </div>
 
@@ -179,7 +217,7 @@ function renderModels(models) {
   }
 
   modelsEl.innerHTML = models.map(cardTemplate).join("");
-  const running = models.filter((m) => m.status === "running").length;
+  const running = models.filter((m) => m.status === "online").length;
   summaryEl.textContent = `${running} / ${models.length} ACTIVE SERVERS`;
 }
 
@@ -203,7 +241,7 @@ async function restartModel(modelId) {
 
     for (let i = 0; i < 60; i++) {
       const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === "stopped") {
+      if (data.status === "offline") {
         break;
       }
       await new Promise((r) => setTimeout(r, 500));
@@ -213,7 +251,7 @@ async function restartModel(modelId) {
 
     for (let i = 0; i < 60; i++) {
       const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === "running") {
+      if (data.status === "online") {
         break;
       }
       await new Promise((r) => setTimeout(r, 500));
@@ -229,7 +267,7 @@ async function startStop(modelId, action) {
     return restartModel(modelId);
   }
 
-  const targetStatus = action === "start" ? "running" : "stopped";
+  const targetStatus = action === "start" ? "online" : "offline";
   inFlight.add(modelId);
   await refreshModels();
   try {
@@ -293,7 +331,8 @@ export function setupModels() {
       }
 
       if (action === "edit") {
-        openEditModal(modelId);
+        const isManaged = target.dataset.managed !== "false";
+        openEditModal(modelId, isManaged);
         return;
       }
 

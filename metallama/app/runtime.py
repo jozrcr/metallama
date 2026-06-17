@@ -183,11 +183,11 @@ def status_for(profile: ModelProfile) -> str:
     state = runtime_processes.get(profile.name)
 
     if not state:
-        return "stopped"
+        return "offline"
     if not is_alive(state.process):
-        return "stopped"
+        return "offline"
 
-    return "running" if is_port_open("127.0.0.1", profile.port) else "starting"
+    return "online" if is_port_open("127.0.0.1", profile.port) else "starting"
 
 
 def model_payload(profile: ModelProfile) -> dict[str, Any]:
@@ -208,7 +208,7 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "port": profile.port,
         "url": f"{Config.BASE_URL}:{profile.port}",
         "status": status,
-        "pid": state.process.pid if state and status == "running" else None,
+        "pid": state.process.pid if state and status == "online" else None,
         "context_window": profile.context_window,
         "parallel": profile.parallel,
         "extra_args": profile.extra_args,

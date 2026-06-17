@@ -40,8 +40,9 @@ def reload_model_profiles() -> dict[str, ModelProfile]:
     Returns the new profiles dict.
     """
     clear_config_cache()
-    global _MODEL_PROFILES
-    _MODEL_PROFILES = _build_profiles()
+    new = _build_profiles()
+    _MODEL_PROFILES.clear()
+    _MODEL_PROFILES.update(new)
     return _MODEL_PROFILES
 
 

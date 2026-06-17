@@ -51,10 +51,12 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
     """Probe a single subserver and backfill its metadata in place."""
     srv.family = _fallback_arch(srv.family)
     props_ctx: int | None = None
+    srv.reachable = False
 
     try:
         r_props = await client.get(f"{srv.url}/props")
         if r_props.status_code == 200:
+            srv.reachable = True
             props_payload = r_props.json()
             if isinstance(props_payload, dict):
                 props_ctx = _extract_props_context_length(props_payload)
@@ -64,6 +66,7 @@ async def probe_one(srv: SubserverConfig, client: httpx.AsyncClient) -> None:
     try:
         r_models = await client.get(f"{srv.url}/v1/models")
         if r_models.status_code == 200:
+            srv.reachable = True
             models = r_models.json().get("data", [])
             selected = _pick_upstream_model(models, srv.name)
             if selected:

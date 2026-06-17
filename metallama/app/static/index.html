@@ -35,14 +35,14 @@
     </header>
 
     <main class="container">
-      <section class="info-banner">
+      <!-- <section class="info-banner">
         <div class="info-banner-row">
           <div class="info-banner-block">
             <span class="info-banner-label">Use LLMs in vscode:</span>
             <span class="info-banner-label">click model > Manage Language Models > + Add Models > "Ollama" > </span>
             <code class="info-banner-url">http://gpu4.hygeos.com:8010/ollama</code>
           </div>
-      </section>
+      </section> -->
       <section>
         <div id="binary-warning" class="binary-warning is-hidden"></div>
         <p id="ui-message" class="ui-message"></p>
@@ -66,23 +66,27 @@
           <div class="modal-columns">
             <div class="modal-column">
               <div class="form-group">
-                <label for="edit-name">Display Name</label>
-                <input type="text" id="edit-name" placeholder="inferred from model path" />
+                <label for="edit-name">Name</label>
+                <input type="text" id="edit-name" />
               </div>
               <div class="form-group">
+                <label for="edit-url">URL</label>
+                <input type="text" id="edit-url" />
+              </div>
+              <div class="form-group managed-only">
                 <label for="edit-port">Port</label>
                 <input type="number" id="edit-port" min="1024" max="65535" />
               </div>
-              <div class="form-group">
+              <div class="form-group managed-only">
                 <label for="edit-context-window">Context Window</label>
                 <input type="number" id="edit-context-window" min="1" step="1000" />
               </div>
-              <div class="form-group">
+              <div class="form-group managed-only">
                 <label for="edit-parallel">Parallel Slots</label>
                 <input type="number" id="edit-parallel" min="1" />
               </div>
             </div>
-            <div class="modal-column">
+            <div class="modal-column managed-only">
               <div class="form-group form-group-stretch">
                 <label for="edit-extra-args">Extra Args (one per line)</label>
                 <textarea id="edit-extra-args"></textarea>

@@ -13,6 +13,7 @@ class SubserverConfig(BaseModel):
     context_length: int = 4096
     upstream_model_id: Optional[str] = None
     upstream_meta: dict[str, Any] = Field(default_factory=dict)
+    reachable: bool = False
 
 
 class AppConfig(BaseModel):
