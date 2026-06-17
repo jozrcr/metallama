@@ -9,14 +9,9 @@ def _build_profiles() -> dict[str, ModelProfile]:
     config = load_unified_config()
     profiles: dict[str, ModelProfile] = {}
     for server in config.managed_servers:
-        profiles[server.id] = ModelProfile(
-            id=server.id,
-            display_name=server.display_name,
+        profiles[server.name] = ModelProfile(
+            name=server.name,
             engine=server.engine,
-            service=server.service,
-            family=server.family,
-            size=server.size,
-            description=server.description,
             model_path=server.model_path,
             port=server.port,
             extra_args=server.extra_args,

@@ -17,14 +17,13 @@ def load_config(path: str | Path = "config.yaml") -> AppConfig:
     unified = load_unified_config()
     subservers: list[SubserverConfig] = []
 
-    # Managed (owned) servers become subservers with localhost URLs.
+    # Managed (owned) servers — use display_name/stem as the registry name so clients
+    # see a meaningful model name instead of the internal id.
     for server in unified.managed_servers:
         subservers.append(SubserverConfig(
-            name=server.id,
+            name=server.name,
             url=f"http://localhost:{server.port}",
             size=0,
-            family=server.family,
-            parameter_size=server.size,
             context_length=server.context_window or 4096,
         ))
 

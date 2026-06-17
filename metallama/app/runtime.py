@@ -35,7 +35,7 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
     for context_window and parallel that may have been updated in config.
     """
     unified = load_unified_config()
-    server_entry = next((s for s in unified.managed_servers if s.id == profile.id), None)
+    server_entry = next((s for s in unified.managed_servers if s.name == profile.name), None)
     if not server_entry:
         return profile
 
@@ -53,10 +53,10 @@ def is_alive(proc: subprocess.Popen[str]) -> bool:
     return proc.poll() is None
 
 
-def cleanup_dead(model_id: str) -> None:
-    state = runtime_processes.get(model_id)
+def cleanup_dead(model_name: str) -> None:
+    state = runtime_processes.get(model_name)
     if state and not is_alive(state.process):
-        runtime_processes.pop(model_id, None)
+        runtime_processes.pop(model_name, None)
 
 
 def is_port_open(host: str, port: int, timeout: float = 0.3) -> bool:
@@ -179,8 +179,8 @@ def build_command(profile: ModelProfile) -> list[str]:
 
 
 def status_for(profile: ModelProfile) -> str:
-    cleanup_dead(profile.id)
-    state = runtime_processes.get(profile.id)
+    cleanup_dead(profile.name)
+    state = runtime_processes.get(profile.name)
 
     if not state:
         return "stopped"
@@ -195,19 +195,23 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
     profile = get_profile_with_config(profile)
     
     status = status_for(profile)
-    state = runtime_processes.get(profile.id)
+    state = runtime_processes.get(profile.name)
+    model_found = _binary_exists(str(profile.model_path)) if profile.model_path else False
     return {
-        "id": profile.id,
-        "display_name": profile.display_name,
+        "id": profile.name,
+        "display_name": profile.name,
         "engine": profile.engine,
-        "service": profile.service,
-        "family": profile.family,
-        "size": profile.size,
-        "description": profile.description,
+        "service": "LLM",
+        "family": "unknown",
+        "size": "unknown",
+        "description": "",
         "port": profile.port,
         "url": f"{Config.BASE_URL}:{profile.port}",
         "status": status,
         "pid": state.process.pid if state and status == "running" else None,
         "context_window": profile.context_window,
         "parallel": profile.parallel,
+        "extra_args": profile.extra_args,
+        "model_found": model_found,
+        "managed": True,
     }

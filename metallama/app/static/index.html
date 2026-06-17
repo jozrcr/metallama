@@ -54,7 +54,49 @@
 
       </section>
     </main>
-    
+
+    <!-- Edit Config Modal -->
+    <div id="edit-modal" class="modal-overlay is-hidden">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h2 id="modal-title">Edit Server Config</h2>
+          <button class="modal-close" data-action="modal-close" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-columns">
+            <div class="modal-column">
+              <div class="form-group">
+                <label for="edit-name">Display Name</label>
+                <input type="text" id="edit-name" placeholder="inferred from model path" />
+              </div>
+              <div class="form-group">
+                <label for="edit-port">Port</label>
+                <input type="number" id="edit-port" min="1024" max="65535" />
+              </div>
+              <div class="form-group">
+                <label for="edit-context-window">Context Window</label>
+                <input type="number" id="edit-context-window" min="1" step="1000" />
+              </div>
+              <div class="form-group">
+                <label for="edit-parallel">Parallel Slots</label>
+                <input type="number" id="edit-parallel" min="1" />
+              </div>
+            </div>
+            <div class="modal-column">
+              <div class="form-group form-group-stretch">
+                <label for="edit-extra-args">Extra Args (one per line)</label>
+                <textarea id="edit-extra-args"></textarea>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-secondary" data-action="modal-cancel">Cancel</button>
+          <button class="btn-primary" data-action="modal-save">Save</button>
+        </div>
+      </div>
+    </div>
+
     <footer class="app-footer">
       <div class="footer-content">
         <div class="vram-container">

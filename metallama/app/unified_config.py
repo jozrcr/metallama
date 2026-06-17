@@ -50,18 +50,17 @@ class LlamaEngineDefaults(BaseModel):
 # ---------------------------------------------------------------------------
 
 class ManagedServer(BaseModel):
-    id: str
-    display_name: str
-    engine: str = "llama"
-    service: str = "LLM"
-    family: str = "unknown"
-    size: str = "unknown"
-    description: str = ""
+    name: str
     model_path: str
     port: int
+    engine: str = "llama"
     context_window: int | None = None
     parallel: int = 1
     extra_args: list[str] = Field(default_factory=list)
+
+    @property
+    def effective_display_name(self) -> str:
+        return self.name
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +135,7 @@ def update_managed_server(server_id: str, updates: dict[str, Any], path: str | P
     """
     config = load_unified_config(path)
     for i, server in enumerate(config.managed_servers):
-        if server.id == server_id:
+        if server.name == server_id:
             for key, value in updates.items():
                 if hasattr(server, key):
                     setattr(server, key, value)
@@ -223,15 +222,11 @@ def save_unified_config(config: UnifiedConfig, path: str | Path = "config.yaml")
     lines.append("# ---------------------------------------------------------------------------")
     lines.append("managed_servers:")
     for server in config.managed_servers:
-        lines.append(f'  - id: "{server.id}"')
-        lines.append(f'    display_name: "{server.display_name}"')
-        lines.append(f'    engine: "{server.engine}"')
-        lines.append(f'    service: "{server.service}"')
-        lines.append(f'    family: "{server.family}"')
-        lines.append(f'    size: "{server.size}"')
-        lines.append(f'    description: "{server.description}"')
+        lines.append(f'  - name: "{server.name}"')
         lines.append(f'    model_path: "{server.model_path}"')
         lines.append(f"    port: {server.port}")
+        if server.engine != "llama":
+            lines.append(f'    engine: "{server.engine}"')
         lines.append(f"    context_window: {server.context_window}")
         lines.append(f"    parallel: {server.parallel}")
         if server.extra_args:

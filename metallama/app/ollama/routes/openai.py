@@ -35,9 +35,10 @@ async def list_models() -> JSONResponse:
             # Server is up but probe may have missed it at startup — re-probe lazily
             if srv.context_length == _DEFAULT_CONTEXT_LENGTH:
                 await probe_one(srv, client)
+            model_name = srv.upstream_model_id or srv.name
             models.append(
                 {
-                    "id": srv.name,
+                    "id": model_name,
                     "object": "model",
                     "created": 1704067200,
                     "owned_by": "metallama",

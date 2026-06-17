@@ -13,7 +13,10 @@ def init_registry(config: AppConfig) -> None:
 
 
 def get_subserver(model_name: str) -> SubserverConfig:
+    # First try the configured name, then fall back to the probed upstream model id.
     srv = _registry.get(model_name)
+    if srv is None:
+        srv = next((s for s in _registry.values() if s.upstream_model_id == model_name), None)
     if srv is None:
         raise HTTPException(status_code=404, detail={"error": "model not found"})
     return srv

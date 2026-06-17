@@ -50,9 +50,7 @@ ram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 
 
 def server_profiles(service: str | None = None) -> dict[str, Any]:
-    if service is None:
-        return dict(MODEL_PROFILES)
-    return {model_id: profile for model_id, profile in MODEL_PROFILES.items() if profile.service == service}
+    return dict(MODEL_PROFILES)
 
 
 def servers_payload(service: str | None = None) -> list[dict[str, Any]]:
@@ -176,7 +174,26 @@ def get_ram_history() -> dict[str, Any]:
 
 @app.get("/api/models")
 def list_models() -> dict[str, Any]:
-    return {"models": [model_payload(profile) for profile in MODEL_PROFILES.values()]}
+    from .unified_config import load_unified_config
+    managed = [model_payload(profile) for profile in MODEL_PROFILES.values()]
+    cfg = load_unified_config()
+    remote = [
+        {
+            "id": srv.name,
+            "display_name": srv.name,
+            "url": srv.url,
+            "status": "remote",
+            "managed": False,
+            "port": None,
+            "pid": None,
+            "context_window": srv.context_length,
+            "parallel": None,
+            "extra_args": [],
+            "model_found": True,
+        }
+        for srv in cfg.remote_servers
+    ]
+    return {"models": managed + remote}
 
 
 @app.get("/api/llm/servers")
@@ -225,16 +242,16 @@ def server_status(server_id: str) -> dict[str, Any]:
     return model_payload(profile)
 
 
-@app.post("/api/models/{model_id}/start")
-async def start_model(model_id: str) -> dict[str, Any]:
-    profile = MODEL_PROFILES.get(model_id)
+@app.post("/api/models/{model_name}/start")
+async def start_model(model_name: str) -> dict[str, Any]:
+    profile = MODEL_PROFILES.get(model_name)
     if not profile:
-        raise HTTPException(status_code=404, detail="Unknown model id")
+        raise HTTPException(status_code=404, detail="Unknown model")
 
-    async with model_locks[model_id]:
-        cleanup_dead(model_id)
+    async with model_locks[model_name]:
+        cleanup_dead(model_name)
 
-        existing = runtime_processes.get(model_id)
+        existing = runtime_processes.get(model_name)
         if existing and is_alive(existing.process):
             raise HTTPException(status_code=409, detail="Already running")
 
@@ -249,7 +266,7 @@ async def start_model(model_id: str) -> dict[str, Any]:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=f"Binary not found: {command[0]}") from exc
 
-        runtime_processes[model_id] = ProcessState(
+        runtime_processes[model_name] = ProcessState(
             process=proc,
             started_at=time.time(),
             command=command,
@@ -276,15 +293,15 @@ async def start_server(server_id: str) -> dict[str, Any]:
     return {"ok": result["ok"], "server": result["model"]}
 
 
-@app.post("/api/models/{model_id}/stop")
-async def stop_model(model_id: str) -> dict[str, Any]:
-    profile = MODEL_PROFILES.get(model_id)
+@app.post("/api/models/{model_name}/stop")
+async def stop_model(model_name: str) -> dict[str, Any]:
+    profile = MODEL_PROFILES.get(model_name)
     if not profile:
-        raise HTTPException(status_code=404, detail="Unknown model id")
+        raise HTTPException(status_code=404, detail="Unknown model")
 
-    async with model_locks[model_id]:
-        cleanup_dead(model_id)
-        state = runtime_processes.get(model_id)
+    async with model_locks[model_name]:
+        cleanup_dead(model_name)
+        state = runtime_processes.get(model_name)
         if not state:
             return {"ok": True, "model": model_payload(profile)}
 
@@ -298,7 +315,7 @@ async def stop_model(model_id: str) -> dict[str, Any]:
             if is_alive(proc):
                 proc.kill()
 
-        runtime_processes.pop(model_id, None)
+        runtime_processes.pop(model_name, None)
 
     return {"ok": True, "model": model_payload(profile)}
 
@@ -321,11 +338,11 @@ async def stop_server(server_id: str) -> dict[str, Any]:
     return {"ok": result["ok"], "server": result["model"]}
 
 
-@app.get("/api/models/{model_id}/status")
-def model_status(model_id: str) -> dict[str, Any]:
-    profile = MODEL_PROFILES.get(model_id)
+@app.get("/api/models/{model_name}/status")
+def model_status(model_name: str) -> dict[str, Any]:
+    profile = MODEL_PROFILES.get(model_name)
     if not profile:
-        raise HTTPException(status_code=404, detail="Unknown model id")
+        raise HTTPException(status_code=404, detail="Unknown model")
     return model_payload(profile)
 
 
@@ -347,7 +364,7 @@ def stop_all_on_shutdown() -> None:
 def model_command_preview(model_id: str) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_id)
     if not profile:
-        raise HTTPException(status_code=404, detail="Unknown model id")
+        raise HTTPException(status_code=404, detail="Unknown model")
     command, binary_found = build_command_preview(profile)
     # Split compound args like "--temp 1.0" into individual tokens, then join.
     # All values come from trusted config, so plain space-join is safe.
@@ -358,24 +375,31 @@ def model_command_preview(model_id: str) -> dict[str, Any]:
     }
 
 
-@app.post("/api/models/{model_id}/config")
-async def update_model_config(model_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+@app.post("/api/models/{model_name}/config")
+async def update_model_config(model_name: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     from .profiles import reload_model_profiles
     from .unified_config import update_managed_server, load_unified_config
-    
-    profile = MODEL_PROFILES.get(model_id)
+
+    profile = MODEL_PROFILES.get(model_name)
     if not profile:
-        raise HTTPException(status_code=404, detail="Unknown model id")
-    
+        raise HTTPException(status_code=404, detail="Unknown model")
+
     # Check if server is running - only allow changes when stopped
-    async with model_locks[model_id]:
-        cleanup_dead(model_id)
-        state = runtime_processes.get(model_id)
+    async with model_locks[model_name]:
+        cleanup_dead(model_name)
+        state = runtime_processes.get(model_name)
         if state and is_alive(state.process):
             raise HTTPException(status_code=409, detail="Cannot change config while server is running")
     
     updates: dict[str, Any] = {}
-    
+
+    # Validate and collect name if provided
+    if "name" in payload:
+        new_name = payload["name"]
+        if not isinstance(new_name, str) or not new_name.strip():
+            raise HTTPException(status_code=400, detail="name must be a non-empty string")
+        updates["name"] = new_name.strip()
+
     # Validate and collect context_window if provided
     if "context_window" in payload:
         context_window = payload["context_window"]
@@ -389,21 +413,37 @@ async def update_model_config(model_id: str, payload: dict[str, Any] = Body(...)
         if not isinstance(parallel, int) or parallel < 1:
             raise HTTPException(status_code=400, detail="parallel must be a positive integer")
         updates["parallel"] = parallel
+
+    # Validate and collect port if provided
+    if "port" in payload:
+        port = payload["port"]
+        if not isinstance(port, int) or port < 1024 or port > 65535:
+            raise HTTPException(status_code=400, detail="port must be between 1024 and 65535")
+        updates["port"] = port
+
+    # Validate and collect extra_args if provided
+    if "extra_args" in payload:
+        extra_args = payload["extra_args"]
+        if not isinstance(extra_args, list) or not all(isinstance(a, str) for a in extra_args):
+            raise HTTPException(status_code=400, detail="extra_args must be a list of strings")
+        updates["extra_args"] = extra_args
     
     if updates:
         # Update config.yaml (machine-managed section)
-        update_managed_server(model_id, updates)
+        update_managed_server(model_name, updates)
         # Reload profiles from disk so changes take effect immediately
         reload_model_profiles()
     
     # Return updated config from unified config
     unified = load_unified_config()
-    server_entry = next((s for s in unified.managed_servers if s.id == model_id), None)
+    server_entry = next((s for s in unified.managed_servers if s.name == model_name), None)
     return {
         "ok": True,
         "config": {
             "context_window": server_entry.context_window,
             "parallel": server_entry.parallel,
+            "port": server_entry.port,
+            "extra_args": server_entry.extra_args,
         } if server_entry else {},
     }
 

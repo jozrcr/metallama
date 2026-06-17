@@ -7,13 +7,8 @@ from pathlib import Path
 
 @dataclass(frozen=True)
 class ModelProfile:
-    id: str
-    display_name: str
+    name: str
     engine: str
-    service: str
-    family: str
-    size: str
-    description: str
     model_path: str | Path
     port: int
     extra_args: list[str]

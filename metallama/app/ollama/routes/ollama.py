@@ -48,13 +48,14 @@ async def list_tags() -> JSONResponse:
                 await probe_one(srv, client)
             arch = srv.upstream_meta.get("general.architecture", srv.family)
             quant = srv.upstream_meta.get("quantization", "unknown")
+            model_name = srv.upstream_model_id or srv.name
             models.append(
                 {
-                    "name": srv.name,
-                    "model": srv.name,
+                    "name": model_name,
+                    "model": model_name,
                     "modified_at": "2025-01-01T00:00:00Z",
                     "size": srv.size,
-                    "digest": _digest(srv.name),
+                    "digest": _digest(model_name),
                     "details": {
                         "format": "gguf",
                         "family": arch,
@@ -81,12 +82,13 @@ async def list_running() -> JSONResponse:
             try:
                 resp = await client.get(f"{srv.url}/health")
                 if resp.status_code == 200:
+                    model_name = srv.upstream_model_id or srv.name
                     running.append(
                         {
-                            "name": srv.name,
-                            "model": srv.name,
+                            "name": model_name,
+                            "model": model_name,
                             "size": srv.size,
-                            "digest": _digest(srv.name),
+                            "digest": _digest(model_name),
                             "expires_at": None,
                             "size_vram": 0,
                             "details": {
@@ -122,6 +124,7 @@ async def show(req: OllamaShowRequest) -> JSONResponse:
     arch = srv.upstream_meta.get("general.architecture", srv.family)
     n_embd = srv.upstream_meta.get("n_embd", 4096)
     quant = srv.upstream_meta.get("quantization", "unknown")
+    model_name = srv.upstream_model_id or srv.name
     model_info = {
         "general.architecture": arch,
         "general.parameter_count": srv.parameter_size,
@@ -131,7 +134,7 @@ async def show(req: OllamaShowRequest) -> JSONResponse:
 
     return JSONResponse(
         {
-            "model": srv.name,
+            "model": model_name,
             "details": {
                 "parent_model": "",
                 "format": "gguf",
