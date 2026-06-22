@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 class ManagedServer(BaseModel):
     name: str
     model_path: str
+    mtp_model_path: str | None = None
     port: int
     engine: str = "llama"
     context_window: int | None = None

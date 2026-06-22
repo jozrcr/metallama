@@ -94,6 +94,65 @@ function populateModelSelector(files, currentPath) {
   };
 }
 
+function populateMtpModelSelector(files, currentPath) {
+  const select = document.getElementById("edit-mtp-model-path");
+  select.innerHTML = "";
+
+  const warning = document.getElementById("edit-mtp-model-warning");
+  const normalizedCurrent = currentPath ? currentPath.replace(/^.*[\\/]/, "") : "";
+  const dir = modelsDirCache ? modelsDirCache.replace(/\/$/, "") + "/" : "";
+
+  // Always include a "None" option at the top
+  const noneOpt = document.createElement("option");
+  noneOpt.value = "";
+  noneOpt.textContent = "(none)";
+  noneOpt.selected = !currentPath;
+  select.appendChild(noneOpt);
+
+  if (!files.length) {
+    if (currentPath) {
+      const opt = document.createElement("option");
+      opt.value = currentPath;
+      opt.textContent = currentPath;
+      opt.selected = true;
+      select.appendChild(opt);
+    }
+    if (warning) warning.classList.add("is-hidden");
+    return;
+  }
+
+  // Check if current MTP model is in the list
+  const found = files.some((f) => {
+    const fname = f.replace(/^.*[\\/]/, "");
+    return fname === normalizedCurrent || currentPath?.includes(fname);
+  });
+
+  if (!found && currentPath) {
+    const opt = document.createElement("option");
+    opt.value = currentPath;
+    opt.textContent = `${normalizedCurrent} (not found)`;
+    opt.selected = true;
+    opt.style.color = "#ef4444";
+    select.appendChild(opt);
+    if (warning) {
+      warning.textContent = `⚠ MTP model file not found locally: ${normalizedCurrent}`;
+      warning.classList.remove("is-hidden");
+    }
+  } else {
+    if (warning) warning.classList.add("is-hidden");
+  }
+
+  files.forEach((f) => {
+    const opt = document.createElement("option");
+    opt.value = dir + f;
+    opt.textContent = f;
+    if (found && currentPath?.includes(f.replace(/^.*[\\/]/, ""))) {
+      opt.selected = true;
+    }
+    select.appendChild(opt);
+  });
+}
+
 function setManagedOnlyVisible(visible) {
   document.querySelectorAll(".managed-only").forEach((el) => {
     el.classList.toggle("is-hidden", !visible);
@@ -113,12 +172,15 @@ function clearModalFields() {
   document.getElementById("edit-name").value = "";
   document.getElementById("edit-url").value = "";
   document.getElementById("edit-model-path").innerHTML = "";
+  document.getElementById("edit-mtp-model-path").innerHTML = "";
   document.getElementById("edit-port").value = "";
   document.getElementById("edit-context-window").value = "";
   document.getElementById("edit-parallel").value = "";
   document.getElementById("edit-extra-args").value = "";
   const warning = document.getElementById("edit-model-warning");
   if (warning) warning.classList.add("is-hidden");
+  const mtpWarning = document.getElementById("edit-mtp-model-warning");
+  if (mtpWarning) mtpWarning.classList.add("is-hidden");
 }
 
 function openEditModal(modelId, isManaged) {
@@ -147,7 +209,10 @@ function openEditModal(modelId, isManaged) {
       document.getElementById("edit-parallel").value = data.parallel || "";
       document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
       // Populate model selector from available .gguf files
-      loadModelFiles().then((mdata) => populateModelSelector(mdata.files || [], data.model_path || ""));
+      loadModelFiles().then((mdata) => {
+        populateModelSelector(mdata.files || [], data.model_path || "");
+        populateMtpModelSelector(mdata.files || [], data.mtp_model_path || "");
+      });
     }
     document.getElementById("edit-modal").classList.remove("is-hidden");
     document.getElementById("modal-delete-btn").classList.remove("is-hidden");
@@ -169,7 +234,10 @@ function openCreateModal(type) {
 
   document.getElementById("modal-title").textContent = isManaged ? "Add Local Server" : "Add Remote Server";
   if (isManaged) {
-    loadModelFiles().then((mdata) => populateModelSelector(mdata.files || [], ""));
+    loadModelFiles().then((mdata) => {
+      populateModelSelector(mdata.files || [], "");
+      populateMtpModelSelector(mdata.files || [], "");
+    });
     // Pre-fill defaults: port = max + 1, CTX = 32K, PAR = 2
     api("/api/models").then((data) => {
       const models = data.models || [];
@@ -218,6 +286,7 @@ async function saveEditModal() {
     const payload = {
       name: newName,
       model_path: document.getElementById("edit-model-path").value.trim(),
+      mtp_model_path: document.getElementById("edit-mtp-model-path").value.trim(),
       port: parseInt(document.getElementById("edit-port").value, 10),
       context_window: parseInt(document.getElementById("edit-context-window").value, 10),
       parallel: parseInt(document.getElementById("edit-parallel").value, 10),
@@ -227,7 +296,7 @@ async function saveEditModal() {
         .filter(Boolean),
     };
     Object.keys(payload).forEach((key) => {
-      if (key === "extra_args" || key === "name" || key === "model_path") return;
+      if (key === "extra_args" || key === "name" || key === "model_path" || key === "mtp_model_path") return;
       if (isNaN(payload[key])) delete payload[key];
     });
     if (payload.name === "") delete payload.name;
@@ -280,6 +349,7 @@ async function saveCreateModal() {
       type: "managed",
       name: newName,
       model_path: document.getElementById("edit-model-path").value.trim(),
+      mtp_model_path: document.getElementById("edit-mtp-model-path").value.trim(),
       port: parseInt(document.getElementById("edit-port").value, 10),
       context_window: parseInt(document.getElementById("edit-context-window").value, 10) || 4096,
       parallel: parseInt(document.getElementById("edit-parallel").value, 10) || 1,

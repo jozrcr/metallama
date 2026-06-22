@@ -14,6 +14,7 @@ class ModelProfile:
     extra_args: list[str]
     context_window: int | None = None
     parallel: int = 1
+    mtp_model_path: str | Path | None = None
 
 
 @dataclass

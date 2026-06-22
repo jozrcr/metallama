@@ -29,7 +29,7 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
     """Get a profile with the latest params from unified config.yaml.
 
     Looks up the managed_server entry by id and applies any overrides
-    for context_window and parallel that may have been updated in config.
+    for context_window, parallel, and mtp_model_path that may have been updated in config.
     """
     unified = load_unified_config()
     server_entry = next((s for s in unified.managed_servers if s.name == profile.name), None)
@@ -41,6 +41,8 @@ def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
         overrides["context_window"] = server_entry.context_window
     if server_entry.parallel != profile.parallel:
         overrides["parallel"] = server_entry.parallel
+    if server_entry.mtp_model_path != profile.mtp_model_path:
+        overrides["mtp_model_path"] = server_entry.mtp_model_path
 
     return replace(profile, **overrides) if overrides else profile
 
@@ -134,7 +136,12 @@ def build_command_preview(profile: ModelProfile) -> tuple[list[str], bool]:
         extra_args = _strip_flag(extra_args, "--parallel")
         extra_args += ["--parallel", str(profile.parallel)]
 
-    return ([binary, "--model", str(profile.model_path), "--host", "0.0.0.0", "--port", str(profile.port), *extra_args], found)
+    cmd = [binary, "--model", str(profile.model_path), "--host", "0.0.0.0", "--port", str(profile.port)]
+    if profile.mtp_model_path:
+        cmd += ["--model-draft", str(profile.mtp_model_path)]
+    cmd += extra_args
+
+    return (cmd, found)
 
 
 def _strip_flag(args: list[str], flag: str) -> list[str]:
@@ -178,7 +185,12 @@ def build_command(profile: ModelProfile) -> list[str]:
     if not model_path.exists():
         raise HTTPException(status_code=400, detail=f"Model file not found: {profile.model_path}")
 
-    return [binary, "--model", str(model_path), "--host", "0.0.0.0", "--port", str(profile.port), *extra_args]
+    cmd = [binary, "--model", str(model_path), "--host", "0.0.0.0", "--port", str(profile.port)]
+    if profile.mtp_model_path:
+        cmd += ["--model-draft", str(profile.mtp_model_path)]
+    cmd += extra_args
+
+    return cmd
 
 
 def status_for(profile: ModelProfile) -> str:
