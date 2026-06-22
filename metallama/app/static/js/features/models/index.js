@@ -5,7 +5,7 @@ import { setConfigMessage } from "../../core/uiMessage.js";
 const modelsEl = document.getElementById("models");
 const summaryEl = document.getElementById("summary");
 
-const inFlight = new Set();
+const inFlight = new Map(); // modelId -> "start" | "stop"
 const cardErrors = new Map();
 
 // ── Edit Modal State ──────────────────────────────────────
@@ -453,7 +453,8 @@ function cardTemplate(model) {
   const accent = cardAccentColor(isManaged);
   const isLoading = inFlight.has(model.id);
   const overlayClass = isLoading ? "panel-overlay card-overlay" : "panel-overlay card-overlay is-hidden";
-  const statusText = action === "start" ? "Starting..." : "Stopping...";
+  const flightAction = inFlight.get(model.id) || action;
+  const statusText = flightAction === "start" ? "Starting..." : "Stopping...";
   const stem = modelStem(model);
 
   const isLLM = type === "LLM";
@@ -541,7 +542,7 @@ export async function refreshModels() {
 }
 
 async function restartModel(modelId) {
-  inFlight.add(modelId);
+  inFlight.set(modelId, "restart");
   await refreshModels();
 
   try {
@@ -577,7 +578,7 @@ async function startStop(modelId, action) {
   }
 
   const targetStatus = action === "start" ? "online" : "offline";
-  inFlight.add(modelId);
+  inFlight.set(modelId, action);
   await refreshModels();
   try {
     const startResp = await api(`/api/models/${modelId}/${action}`, { method: "POST" });
