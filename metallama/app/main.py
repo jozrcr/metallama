@@ -465,24 +465,37 @@ def model_status(model_name: str) -> dict[str, Any]:
 
 @app.get("/api/models/{model_name}/slots")
 async def model_slots(model_name: str) -> Any:
-    """Proxy to a managed llama.cpp server's /slots endpoint.
+    """Proxy to a llama.cpp server's /slots endpoint.
 
+    Works for both managed servers (looked up by port on 127.0.0.1) and
+    remote servers (looked up by configured URL).
     Returns a compact list of slot statuses for UI indicators.
     """
     import httpx
 
     from .runtime import status_for
+    from .unified_config import load_unified_config
+
+    # Resolve the upstream /slots URL
+    slots_url: str | None = None
 
     profile = MODEL_PROFILES.get(model_name)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown model")
-    if status_for(profile) != "online":
-        raise HTTPException(status_code=503, detail="Server not online")
+    if profile:
+        if status_for(profile) != "online":
+            raise HTTPException(status_code=503, detail="Server not online")
+        slots_url = f"http://127.0.0.1:{profile.port}/slots"
+    else:
+        # Try remote servers
+        cfg = load_unified_config()
+        srv_cfg = next((s for s in cfg.remote_servers if s.name == model_name), None)
+        if not srv_cfg:
+            raise HTTPException(status_code=404, detail="Unknown model")
+        base = srv_cfg.url.rstrip("/")
+        slots_url = f"{base}/slots"
 
-    url = f"http://127.0.0.1:{profile.port}/slots"
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
-            resp = await client.get(url)
+            resp = await client.get(slots_url)
         if resp.status_code != 200:
             raise HTTPException(status_code=502, detail=f"Upstream returned {resp.status_code}")
         data = resp.json()

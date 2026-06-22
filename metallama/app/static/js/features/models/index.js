@@ -444,23 +444,18 @@ function modelStem(model) {
 }
 
 function slotIndicators(model) {
-  if (model.managed === false || model.status !== "online") return "";
+  if (model.status !== "online") return "";
   const cached = slotCache.get(model.id);
-  const par = model.parallel || 1;
-  let slots = cached?.slots;
-  // If we don't have live data yet, render placeholder dots based on PAR count
-  if (!slots) {
-    let html = `<div class="slot-indicators" data-slot-model="${model.id}" title="Loading slot status…">`;
-    for (let i = 0; i < par; i++) {
-      html += `<span class="slot-dot unknown"></span>`;
-    }
-    html += `</div>`;
-    return html;
-  }
-  // If upstream returned fewer slots than PAR, pad; if more, show all
-  const count = Math.max(slots.length, par);
-  let html = `<div class="slot-indicators" data-slot-model="${model.id}" title="${slots.filter(s => s.is_processing).length}/${slots.length} slots busy">`;
-  for (let i = 0; i < count; i++) {
+  const par = model.parallel || 0;
+  // Determine how many dots to render: use live slot count if available,
+  // otherwise fall back to PAR (managed servers only)
+  let slotCount = cached?.slots?.length || 0;
+  let dotCount = Math.max(slotCount, par);
+  if (!dotCount) return ""; // no PAR info and no live data yet
+
+  let html = `<div class="slot-indicators" data-slot-model="${model.id}" title="Loading slot status…">`;
+  const slots = cached?.slots || [];
+  for (let i = 0; i < dotCount; i++) {
     const s = slots[i];
     const cls = !s ? "unknown" : (s.is_processing ? "busy" : "free");
     html += `<span class="slot-dot ${cls}"></span>`;
@@ -471,16 +466,14 @@ function slotIndicators(model) {
 
 async function refreshSlots(models) {
   const targets = (models || []).filter(
-    (m) => m.managed !== false && m.status === "online" && !inFlight.has(m.id)
+    (m) => m.status === "online" && !inFlight.has(m.id)
   );
   if (!targets.length) {
-    // Clear stale cache for servers no longer online
     for (const key of slotCache.keys()) {
       if (!targets.some((m) => m.id === key)) slotCache.delete(key);
     }
     return;
   }
-  // Clear stale entries
   for (const key of slotCache.keys()) {
     if (!targets.some((m) => m.id === key)) slotCache.delete(key);
   }
@@ -498,25 +491,29 @@ async function refreshSlots(models) {
 }
 
 function updateSlotIndicators() {
-  // Update only the slot indicator DOM nodes without full re-render
-  document.querySelectorAll(".slot-indicators[data-slot-model]").forEach((el) => {
-    const modelId = el.dataset.slotModel;
+  // Update slot indicator DOM nodes. If a container is missing (because slot
+  // data arrived after the initial render), inject it into the card's center col.
+  document.querySelectorAll(".card[data-model-id]").forEach((card) => {
+    const modelId = card.dataset.modelId;
     const cached = slotCache.get(modelId);
     if (!cached) return;
     const slots = cached.slots;
+    if (!slots.length) return;
     const busy = slots.filter((s) => s.is_processing).length;
-    el.title = `${busy}/${slots.length} slots busy`;
-    // Rebuild dots
-    const existing = el.querySelectorAll(".slot-dot");
-    slots.forEach((s, i) => {
-      const dot = existing[i];
-      if (!dot) return;
-      const cls = s.is_processing ? "busy" : "free";
-      if (!dot.classList.contains(cls)) {
-        dot.classList.remove("free", "busy", "unknown");
-        dot.classList.add(cls);
-      }
-    });
+    let container = card.querySelector(".slot-indicators[data-slot-model]");
+    if (!container) {
+      const centerCol = card.querySelector(".card-center-col");
+      if (!centerCol) return;
+      container = document.createElement("div");
+      container.className = "slot-indicators";
+      container.dataset.slotModel = modelId;
+      centerCol.appendChild(container);
+    }
+    container.title = `${busy}/${slots.length} slots busy`;
+    // Rebuild dots to match the slot count
+    container.innerHTML = slots
+      .map((s) => `<span class="slot-dot ${s.is_processing ? "busy" : "free"}"></span>`)
+      .join("");
   });
 }
 
@@ -545,7 +542,6 @@ function cardTemplate(model) {
       ? `
     <span class="info-item">CTX: ${ctxKTokens}k</span>
     ${parValue ? `<span class="info-item">PAR: ${parValue}</span>` : ""}
-    ${slotsHtml}
   `
       : "";
 
@@ -581,10 +577,15 @@ function cardTemplate(model) {
           </div>
         </div>
 
-        <p class="description">${model.description || ""}</p>
+        <div class="card-center-col">
+          ${slotsHtml}
+        </div>
 
         <div class="card-actions-col">
-          ${isManaged ? `<button class="btn-action-${action} admin-only" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>` : ""}
+          ${isManaged
+            ? `<button class="btn-action-${action} admin-only" data-id="${model.id}" data-action="${action}" ${canRunAction ? "" : "disabled"}>${label}</button>`
+            : `<button class="btn-action-start disabled-remote" disabled title="Remote servers cannot be managed from here">${model.status === "online" ? "Stop" : "Start"}</button>`
+          }
         </div>
       </div>
 
