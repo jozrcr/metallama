@@ -72,7 +72,7 @@ function renderSearchResult(item) {
       <div class="hf-result-header">
         <span class="hf-result-name">${escapeHtml(item.id)}</span>
         <span class="hf-result-meta">
-          <span class="hf-result-stat hf-stat-downloads">↓ ${downloads}</span>
+          <span class="hf-result-stat hf-stat-downloads">${downloads}</span>
           <span class="hf-result-stat hf-stat-likes">♥ ${likes}</span>
         </span>
       </div>
@@ -142,7 +142,7 @@ function renderFile(file, repoId) {
         <span class="hf-file-size">${size}</span>
       </div>
       <div class="hf-file-actions">
-        <button class="btn-primary btn-small hf-download-btn admin-only" data-repo-id="${escapeHtml(repoId)}">↓ Download</button>
+        <button class="btn-primary btn-small hf-download-btn admin-only" data-repo-id="${escapeHtml(repoId)}">Download</button>
       </div>
     </div>
   `;
