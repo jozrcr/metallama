@@ -613,7 +613,14 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
         if not isinstance(extra_args, list) or not all(isinstance(a, str) for a in extra_args):
             raise HTTPException(status_code=400, detail="extra_args must be a list of strings")
         updates["extra_args"] = extra_args
-    
+
+    # Validate and collect model_draft if provided
+    if "model_draft" in payload:
+        mtp = payload["model_draft"]
+        if not isinstance(mtp, str):
+            raise HTTPException(status_code=400, detail="model_draft must be a string")
+        updates["model_draft"] = mtp.strip()
+
     if updates:
         # Update config.yaml (machine-managed section)
         update_managed_server(model_name, updates)

@@ -17,7 +17,7 @@ def _build_profiles() -> dict[str, ModelProfile]:
             extra_args=server.extra_args,
             context_window=server.context_window,
             parallel=server.parallel,
-            mtp_model_path=server.mtp_model_path,
+            model_draft=server.model_draft,
         )
     return profiles
 

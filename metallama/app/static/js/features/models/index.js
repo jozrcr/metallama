@@ -95,11 +95,11 @@ function populateModelSelector(files, currentPath) {
   };
 }
 
-function populateMtpModelSelector(files, currentPath) {
-  const select = document.getElementById("edit-mtp-model-path");
+function populateModelDraftSelector(files, currentPath) {
+  const select = document.getElementById("edit-model-draft");
   select.innerHTML = "";
 
-  const warning = document.getElementById("edit-mtp-model-warning");
+  const warning = document.getElementById("edit-model-draft-warning");
   const normalizedCurrent = currentPath ? currentPath.replace(/^.*[\\/]/, "") : "";
   const dir = modelsDirCache ? modelsDirCache.replace(/\/$/, "") + "/" : "";
 
@@ -122,7 +122,7 @@ function populateMtpModelSelector(files, currentPath) {
     return;
   }
 
-  // Check if current MTP model is in the list
+  // Check if current draft model is in the list
   const found = files.some((f) => {
     const fname = f.replace(/^.*[\\/]/, "");
     return fname === normalizedCurrent || currentPath?.includes(fname);
@@ -136,7 +136,7 @@ function populateMtpModelSelector(files, currentPath) {
     opt.style.color = "#ef4444";
     select.appendChild(opt);
     if (warning) {
-      warning.textContent = `⚠ MTP model file not found locally: ${normalizedCurrent}`;
+      warning.textContent = `⚠ Draft model file not found locally: ${normalizedCurrent}`;
       warning.classList.remove("is-hidden");
     }
   } else {
@@ -173,14 +173,14 @@ function clearModalFields() {
   document.getElementById("edit-name").value = "";
   document.getElementById("edit-url").value = "";
   document.getElementById("edit-model-path").innerHTML = "";
-  document.getElementById("edit-mtp-model-path").innerHTML = "";
+  document.getElementById("edit-model-draft").innerHTML = "";
   document.getElementById("edit-port").value = "";
   document.getElementById("edit-context-window").value = "";
   document.getElementById("edit-parallel").value = "";
   document.getElementById("edit-extra-args").value = "";
   const warning = document.getElementById("edit-model-warning");
   if (warning) warning.classList.add("is-hidden");
-  const mtpWarning = document.getElementById("edit-mtp-model-warning");
+  const mtpWarning = document.getElementById("edit-model-draft-warning");
   if (mtpWarning) mtpWarning.classList.add("is-hidden");
 }
 
@@ -212,7 +212,7 @@ function openEditModal(modelId, isManaged) {
       // Populate model selector from available .gguf files
       loadModelFiles().then((mdata) => {
         populateModelSelector(mdata.files || [], data.model_path || "");
-        populateMtpModelSelector(mdata.files || [], data.mtp_model_path || "");
+        populateModelDraftSelector(mdata.files || [], data.model_draft || "");
       });
     }
     document.getElementById("edit-modal").classList.remove("is-hidden");
@@ -237,7 +237,7 @@ function openCreateModal(type) {
   if (isManaged) {
     loadModelFiles().then((mdata) => {
       populateModelSelector(mdata.files || [], "");
-      populateMtpModelSelector(mdata.files || [], "");
+      populateModelDraftSelector(mdata.files || [], "");
     });
     // Pre-fill defaults: port = max + 1, CTX = 32K, PAR = 2
     api("/api/models").then((data) => {
@@ -287,7 +287,7 @@ async function saveEditModal() {
     const payload = {
       name: newName,
       model_path: document.getElementById("edit-model-path").value.trim(),
-      mtp_model_path: document.getElementById("edit-mtp-model-path").value.trim(),
+      model_draft: document.getElementById("edit-model-draft").value.trim(),
       port: parseInt(document.getElementById("edit-port").value, 10),
       context_window: parseInt(document.getElementById("edit-context-window").value, 10),
       parallel: parseInt(document.getElementById("edit-parallel").value, 10),
@@ -297,7 +297,7 @@ async function saveEditModal() {
         .filter(Boolean),
     };
     Object.keys(payload).forEach((key) => {
-      if (key === "extra_args" || key === "name" || key === "model_path" || key === "mtp_model_path") return;
+      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft") return;
       if (isNaN(payload[key])) delete payload[key];
     });
     if (payload.name === "") delete payload.name;
@@ -350,7 +350,7 @@ async function saveCreateModal() {
       type: "managed",
       name: newName,
       model_path: document.getElementById("edit-model-path").value.trim(),
-      mtp_model_path: document.getElementById("edit-mtp-model-path").value.trim(),
+      model_draft: document.getElementById("edit-model-draft").value.trim(),
       port: parseInt(document.getElementById("edit-port").value, 10),
       context_window: parseInt(document.getElementById("edit-context-window").value, 10) || 4096,
       parallel: parseInt(document.getElementById("edit-parallel").value, 10) || 1,

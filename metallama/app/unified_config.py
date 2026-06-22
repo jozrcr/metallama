@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 class ManagedServer(BaseModel):
     name: str
     model_path: str
-    mtp_model_path: str | None = None
+    model_draft: str | None = None
     port: int
     engine: str = "llama"
     context_window: int | None = None
@@ -264,6 +264,8 @@ def save_unified_config(config: UnifiedConfig, path: str | Path = "config.yaml")
     for server in config.managed_servers:
         lines.append(f'  - name: "{server.name}"')
         lines.append(f'    model_path: "{server.model_path}"')
+        if server.model_draft:
+            lines.append(f'    model_draft: "{server.model_draft}"')
         lines.append(f"    port: {server.port}")
         if server.engine != "llama":
             lines.append(f'    engine: "{server.engine}"')
