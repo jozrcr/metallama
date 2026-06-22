@@ -480,21 +480,21 @@ async function restartModel(modelId) {
 
     for (let i = 0; i < 60; i++) {
       const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === "offline") {
-        break;
-      }
+      if (data.status === "offline") break;
       await new Promise((r) => setTimeout(r, 500));
     }
 
     await api(`/api/models/${modelId}/start`, { method: "POST" });
 
     for (let i = 0; i < 60; i++) {
-      const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === "online") {
-        break;
-      }
       await new Promise((r) => setTimeout(r, 500));
+      const data = await api(`/api/models/${modelId}/status`);
+      if (data.status === "online") return;
+      if (data.status === "offline" && i > 1) {
+        throw new Error("Server process exited unexpectedly after restart. Check CMD for details.");
+      }
     }
+    throw new Error("Timed out waiting for server to come online after restart (30s).");
   } finally {
     inFlight.delete(modelId);
     await refreshModels();
@@ -510,14 +510,23 @@ async function startStop(modelId, action) {
   inFlight.add(modelId);
   await refreshModels();
   try {
-    await api(`/api/models/${modelId}/${action}`, { method: "POST" });
+    const startResp = await api(`/api/models/${modelId}/${action}`, { method: "POST" });
     setCardError(modelId, "");
+
     for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 500));
       const data = await api(`/api/models/${modelId}/status`);
       if (data.status === targetStatus) {
-        break;
+        return; // success
       }
-      await new Promise((r) => setTimeout(r, 500));
+      // Process died during startup — stop polling and report
+      if (action === "start" && data.status === "offline" && i > 1) {
+        throw new Error("Server process exited unexpectedly. Check the launch command (CMD) for details.");
+      }
+    }
+    // Timed out
+    if (action === "start") {
+      throw new Error("Timed out waiting for server to come online (30s).");
     }
   } finally {
     inFlight.delete(modelId);
