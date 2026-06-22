@@ -8,7 +8,7 @@ from collections import deque
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -110,6 +110,17 @@ def auth_logout(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
 @app.get("/api/auth/status")
 def auth_status() -> dict[str, Any]:
     return {"auth_enabled": auth_enabled()}
+
+
+@app.get("/api/auth/verify")
+def auth_verify(authorization: str = Header("")) -> dict[str, Any]:
+    if not auth_enabled():
+        return {"valid": True}
+    if not authorization.startswith("Bearer "):
+        return {"valid": False}
+    from .auth import validate_session
+    token = authorization[7:]
+    return {"valid": validate_session(token)}
 
 
 @app.get("/api/system/vram")
@@ -301,7 +312,7 @@ async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> d
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model")
 
-    async with model_locks[model_name]:
+    async with model_locks.setdefault(model_name, asyncio.Lock()):
         cleanup_dead(model_name)
 
         existing = runtime_processes.get(model_name)
@@ -352,7 +363,7 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model")
 
-    async with model_locks[model_name]:
+    async with model_locks.setdefault(model_name, asyncio.Lock()):
         cleanup_dead(model_name)
         state = runtime_processes.get(model_name)
         if not state:
@@ -426,7 +437,7 @@ async def delete_model(model_name: str, _guard: None = Depends(admin_guard)) -> 
 
     # Try managed first
     if MODEL_PROFILES.get(model_name):
-        async with model_locks[model_name]:
+        async with model_locks.setdefault(model_name, asyncio.Lock()):
             cleanup_dead(model_name)
             state = runtime_processes.get(model_name)
             if state and is_alive(state.process):
@@ -491,7 +502,7 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
         raise HTTPException(status_code=404, detail="Unknown model")
 
     # Check if server is running - only allow changes when stopped
-    async with model_locks[model_name]:
+    async with model_locks.setdefault(model_name, asyncio.Lock()):
         cleanup_dead(model_name)
         state = runtime_processes.get(model_name)
         if state and is_alive(state.process):

@@ -1,6 +1,6 @@
 import { api } from "./core/api.js";
 import { setConfigMessage } from "./core/uiMessage.js";
-import { checkAuthEnabled, isAdmin, login, logout, onAdminChange } from "./core/auth.js";
+import { checkAuthEnabled, isAdmin, login, logout, onAdminChange, verifyToken } from "./core/auth.js";
 import { setupModels, refreshModels } from "./features/models/index.js";
 import { setupHfSearch } from "./features/hf/index.js";
 import { refreshRam, refreshRamGraph, refreshVram, refreshVramGraph } from "./features/system/index.js";
@@ -43,6 +43,7 @@ async function init() {
 
   // Auth: check if enabled, wire up admin toggle
   await checkAuthEnabled();
+  await verifyToken();
   const toggleBtn = document.getElementById("admin-toggle");
   const toggleLabel = document.getElementById("admin-toggle-label");
 
@@ -133,6 +134,10 @@ async function init() {
   setInterval(() => {
     refreshModels().catch(() => {});
   }, 2000);
+
+  setInterval(() => {
+    verifyToken().catch(() => {});
+  }, 5000);
 
   setInterval(() => {
     refreshVram().catch(() => {});

@@ -409,7 +409,10 @@ function cardTemplate(model) {
           <h3>${model.display_name}</h3>
           ${stem ? `<span class="card-model-stem">${escapeHtml(stem)}</span>` : ""}
         </div>
-        <div class="status-badge ${model.status}">${model.status}</div>
+        <div class="header-badges">
+          <span class="locality-badge ${isManaged ? "local" : "remote"}">${isManaged ? "Local" : "Remote"}</span>
+          <div class="status-badge ${model.status}">${model.status}</div>
+        </div>
       </div>
 
       <div class="card-main-row">

@@ -26,6 +26,24 @@ export function isAdmin() {
   return !!getToken();
 }
 
+/** Validate the stored token against the server. Clears it if invalid. */
+export async function verifyToken() {
+  const token = getToken();
+  if (!_authEnabled || !token) return;
+  try {
+    const r = await fetch("/api/auth/verify", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const data = await r.json();
+    if (!data.valid) {
+      sessionStorage.removeItem(TOKEN_KEY);
+      notifyChange();
+    }
+  } catch {
+    // Network error — keep token, don't log user out on transient failures
+  }
+}
+
 /** Get the stored token (or null). */
 export function getToken() {
   return sessionStorage.getItem(TOKEN_KEY);

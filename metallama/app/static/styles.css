@@ -532,6 +532,34 @@ body {
 .status-badge.offline { color: var(--red); }
 .status-badge.starting { color: var(--yellow, #f59e0b); }
 
+.header-badges {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.locality-badge {
+  font-weight: 900;
+  text-transform: uppercase;
+  font-size: 0.62rem;
+  letter-spacing: 0.05em;
+  padding: 3px 8px;
+  border-radius: 3px;
+  line-height: 1;
+}
+
+.locality-badge.local {
+  background: color-mix(in srgb, var(--blue) 18%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--blue) 50%, var(--line));
+  color: var(--blue);
+}
+
+.locality-badge.remote {
+  background: color-mix(in srgb, #8B5CF6 18%, var(--panel));
+  border: 1px solid color-mix(in srgb, #8B5CF6 50%, var(--line));
+  color: #8B5CF6;
+}
+
 .btn-action-start {
   background: color-mix(in srgb, #8EC561 18%, var(--panel));
   border-color: color-mix(in srgb, #8EC561 72%, var(--line));
