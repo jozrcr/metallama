@@ -66,6 +66,7 @@
                 <button class="chip-btn" type="button" data-status="running">Running</button>
                 <button class="chip-btn" type="button" data-status="offline">Offline</button>
               </div>
+              <button id="connect-btn" class="btn-secondary" title="Connect editors and agents to your models">🔌 Connect</button>
               <button id="defaults-btn" class="btn-secondary admin-only" title="Edit default engine params">⚙ Defaults</button>
               <button id="add-model-btn" class="btn-primary admin-only" title="Add a new server">+ Add Server</button>
             </div>
@@ -188,6 +189,63 @@
         <div class="modal-footer">
           <button class="btn-secondary" data-action="defaults-cancel">Cancel</button>
           <button class="btn-primary" data-action="defaults-save">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Connect Modal -->
+    <div id="connect-modal" class="modal-overlay is-hidden">
+      <div class="modal-dialog" style="max-width: 640px;">
+        <div class="modal-header">
+          <h2>Connect your tools</h2>
+          <button class="modal-close" data-action="connect-close" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="connect-model">Model</label>
+            <select id="connect-model"></select>
+          </div>
+
+          <div class="connect-section">
+            <div class="connect-section-head">
+              <h3>VS Code — Copilot Chat (Ollama provider)</h3>
+            </div>
+            <p class="connect-hint">Chat sidebar → model picker → <em>Manage Language Models…</em> → <em>Ollama</em>, then set the URL:</p>
+            <div class="snippet-row">
+              <code class="snippet" id="connect-ollama-url"></code>
+              <button class="btn-secondary btn-small" data-copy="connect-ollama-url">Copy</button>
+            </div>
+          </div>
+
+          <div class="connect-section">
+            <div class="connect-section-head">
+              <h3>Qwen Code / OpenAI-compatible CLIs</h3>
+            </div>
+            <div class="snippet-row">
+              <pre class="snippet" id="connect-env"></pre>
+              <button class="btn-secondary btn-small" data-copy="connect-env">Copy</button>
+            </div>
+          </div>
+
+          <div class="connect-section">
+            <div class="connect-section-head">
+              <h3>Cline / Continue / any OpenAI-compatible client</h3>
+            </div>
+            <div class="snippet-row">
+              <pre class="snippet" id="connect-openai"></pre>
+              <button class="btn-secondary btn-small" data-copy="connect-openai">Copy</button>
+            </div>
+          </div>
+
+          <div class="connect-section">
+            <div class="connect-section-head">
+              <h3>curl</h3>
+            </div>
+            <div class="snippet-row">
+              <pre class="snippet" id="connect-curl"></pre>
+              <button class="btn-secondary btn-small" data-copy="connect-curl">Copy</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

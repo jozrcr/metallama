@@ -17,9 +17,8 @@ from .config import STATIC_DIR, Config
 from .hf_routes import router as hf_router
 from .logs import begin_capture, get_last_exit, log_file_path, mark_expected_stop, server_logs
 from .models import ProcessState
-from .ollama.config import load_config as load_ollama_config
 from .ollama.probe import probe_subservers
-from .ollama.registry import init_registry as init_ollama_registry
+from .ollama.registry import rebuild_registry as rebuild_ollama_registry
 from .ollama.routes.ollama import router as ollama_router
 from .ollama.routes.openai import router as openai_router
 from .profiles import MODEL_PROFILES
@@ -42,8 +41,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Ollama / OpenAI gateway (mounted at /ollama)
 # ---------------------------------------------------------------------------
 
-_ollama_cfg = load_ollama_config()
-init_ollama_registry(_ollama_cfg)
+rebuild_ollama_registry()
 app.include_router(ollama_router, prefix="/ollama")
 app.include_router(openai_router, prefix="/ollama")
 app.include_router(hf_router)
@@ -421,6 +419,7 @@ async def create_model(payload: dict[str, Any] = Body(...), _guard: None = Depen
             raise HTTPException(status_code=400, detail="model_path is required")
         server = add_managed_server(payload)
         reload_model_profiles()
+        rebuild_ollama_registry()
         return {"ok": True, "name": server.name}
     elif model_type == "remote":
         if not payload.get("name"):
@@ -448,6 +447,7 @@ async def delete_model(model_name: str, _guard: None = Depends(admin_guard)) -> 
                 raise HTTPException(status_code=409, detail="Stop the server before deleting")
         delete_managed_server(model_name)
         reload_model_profiles()
+        rebuild_ollama_registry()
         return {"ok": True, "deleted": model_name}
 
     # Try remote
@@ -659,6 +659,7 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
         update_managed_server(model_name, updates)
         # Reload profiles from disk so changes take effect immediately
         reload_model_profiles()
+        rebuild_ollama_registry()
     
     # Return updated config from unified config
     unified = load_unified_config()
@@ -696,6 +697,7 @@ async def update_remote_server_config(server_name: str, payload: dict[str, Any] 
 
     if updates:
         update_remote_server(server_name, updates)
+        rebuild_ollama_registry()
 
     unified = load_unified_config()
     entry = next((s for s in unified.remote_servers if s.name == (updates.get("name") or server_name)), None)
