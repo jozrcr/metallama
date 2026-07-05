@@ -659,11 +659,22 @@ function cardTemplate(model) {
   const ctxKTokens = ctxValue ? Math.round(ctxValue / 1000) : "";
   const parValue = model.parallel || "";
   const slotsHtml = slotIndicators(model);
+  const est = model.vram_estimate;
+  const estWarn = est && est.likely_fits === false && model.status === "offline";
+  const estTitle = est
+    ? `Estimated VRAM (upper bound): weights ≈ ${est.weights_gb} GB + KV cache ≈ ${est.kv_cache_gb} GB + ~1 GB overhead.` +
+      (est.free_vram_gb != null ? ` Free VRAM now: ${est.free_vram_gb} GB.` : "") +
+      (estWarn ? " Likely will NOT fit — reduce context, parallel slots, or use a smaller quant." : "")
+    : "";
+  const estChip = est
+    ? `<span class="info-item vram-est${estWarn ? " warn" : ""}" title="${escapeHtml(estTitle)}">≈${est.total_gb} GB${estWarn ? " ⚠" : ""}</span>`
+    : "";
   const ctxDisplay =
     isLLM
       ? `
     <span class="info-item">CTX: ${ctxKTokens}k</span>
     ${parValue ? `<span class="info-item">PAR: ${parValue}</span>` : ""}
+    ${estChip}
   `
       : "";
 
@@ -809,6 +820,24 @@ async function restartModel(modelId) {
 async function startStop(modelId, action) {
   if (action === "restart") {
     return restartModel(modelId);
+  }
+
+  if (action === "start") {
+    try {
+      const m = await api(`/api/models/${encodeURIComponent(modelId)}/status`);
+      const est = m.vram_estimate;
+      if (est && est.likely_fits === false) {
+        const ok = window.confirm(
+          `This model is estimated to need ≈${est.total_gb} GB VRAM ` +
+          `(weights ${est.weights_gb} GB + KV cache ${est.kv_cache_gb} GB), ` +
+          `but only ${est.free_vram_gb} GB is free.\n\n` +
+          `It will likely fail to load or run partially on CPU. Start anyway?`
+        );
+        if (!ok) return;
+      }
+    } catch {
+      // estimate unavailable — proceed
+    }
   }
 
   inFlight.set(modelId, action);

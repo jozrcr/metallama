@@ -1526,3 +1526,13 @@ body.admin-locked .disabled-readonly {
   text-overflow: ellipsis;
   min-width: 0;
 }
+
+/* ── VRAM estimate chip ────────────────────────────────── */
+.vram-est {
+  cursor: help;
+}
+
+.vram-est.warn {
+  color: var(--accent-2);
+  font-weight: 800;
+}

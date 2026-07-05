@@ -12,6 +12,8 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import Config
+from .gguf import estimate_vram_gb
+from .gpu import get_free_vram_gb
 from .logs import get_unexpected_exit, server_logs
 from .models import ModelProfile, ProcessState
 from .profiles import MODEL_PROFILES
@@ -227,6 +229,55 @@ def status_for(profile: ModelProfile) -> str:
         return "starting"
 
 
+# Approximate bytes per KV-cache element for llama.cpp --cache-type-k/v values
+_KV_TYPE_BYTES = {
+    "f32": 4.0, "f16": 2.0, "bf16": 2.0,
+    "q8_0": 1.0625, "q5_1": 0.75, "q5_0": 0.6875,
+    "q4_1": 0.625, "q4_0": 0.5625, "iq4_nl": 0.5625,
+}
+
+# Fit tolerance: estimates assume worst-case f16 dense-attention KV, so only
+# warn when the estimate exceeds free VRAM by a clear margin.
+_FIT_TOLERANCE = 1.25
+
+
+def _kv_bytes_per_element(profile: ModelProfile) -> float:
+    """Derive KV-cache element size from --cache-type-k/v in merged args."""
+    args = [
+        token
+        for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
+        for token in arg.split()
+    ]
+
+    def flag_value(flag: str) -> str | None:
+        if flag in args:
+            i = args.index(flag)
+            if i + 1 < len(args):
+                return args[i + 1]
+        return None
+
+    k = _KV_TYPE_BYTES.get((flag_value("--cache-type-k") or "f16").lower(), 2.0)
+    v = _KV_TYPE_BYTES.get((flag_value("--cache-type-v") or "f16").lower(), 2.0)
+    return (k + v) / 2
+
+
+def vram_estimate_for(profile: ModelProfile) -> dict[str, Any] | None:
+    """VRAM-fit estimate for a managed server's current config."""
+    ctx_total = (profile.context_window or 4096) * (profile.parallel or 1)
+    est = estimate_vram_gb(
+        profile.model_path,
+        ctx_total,
+        profile.model_draft,
+        kv_bytes_per_element=_kv_bytes_per_element(profile),
+    )
+    if not est:
+        return None
+    free = get_free_vram_gb()
+    est["free_vram_gb"] = free
+    est["likely_fits"] = (est["total_gb"] <= free * _FIT_TOLERANCE) if free is not None else None
+    return est
+
+
 def _load_progress(profile: ModelProfile, state: ProcessState) -> float | None:
     """Estimate model-load progress as bytes-read-by-process / model file size.
 
@@ -297,4 +348,5 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "started_at": state.started_at if state else None,
         "last_log": last_log,
         "load_progress": load_progress,
+        "vram_estimate": vram_estimate_for(profile) if model_found else None,
     }
