@@ -13,7 +13,7 @@ load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
 class Config:
     EXECUTABLE_LLAMA = os.getenv("METALLAMA_LLAMACPP_BINARY", "")
-    BASE_URL = os.getenv("METALLAMA_BASE_URL", "http://gpu4.hygeos.com")
+    BASE_URL = os.getenv("METALLAMA_BASE_URL", "http://localhost")
     MODELS_DIR = os.getenv("METALLAMA_MODELS_DIR", "")
 
 

@@ -6,12 +6,13 @@ Built with FastAPI (Python 3.11+) and vanilla HTML/CSS/JS, no build.
 
 ## What It Does
 
-- **Download GGUF models** — browse HuggingFace Hub, pick `.gguf` files, and download with streaming progress
-- **Spawn & manage llama.cpp instances** — start, stop, and configure local servers from a web UI
+- **Download GGUF models** — browse HuggingFace Hub, pick `.gguf` files, download with live speed, cancel/resume, and a one-click "create server" on completion
+- **Spawn & manage llama.cpp instances** — start, stop, and configure local servers from a web UI, with live logs, load-progress bars, and crash diagnostics on every card
+- **VRAM-fit estimates** — GGUF metadata is parsed locally to warn before you launch a model that won't fit
 - **Unified Ollama-compatible gateway** — one `/ollama` endpoint fans out requests to all registered servers
 - **Plug in remote servers** — point to llama.cpp instances on other machines and route through the same gateway
 - **OpenAI-compatible API** — `/v1/chat/completions` and model listing work out of the box
-- **Live system monitoring** — VRAM and RAM usage with history graphs
+- **Live system monitoring** — VRAM (NVIDIA, ROCm, or amd-smi) and RAM usage with history graphs
 - **Optional admin auth** — scrypt-based password login with 8-hour sessions
 - **Dark / light theme**
 
@@ -22,7 +23,7 @@ Built with FastAPI (Python 3.11+) and vanilla HTML/CSS/JS, no build.
 - Python ≥ 3.11
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - `llama-server` binary (only needed for local models)
-- `nvidia-smi` (optional, for VRAM monitoring)
+- `nvidia-smi`, `rocm-smi`, or `amd-smi` (optional, for VRAM monitoring and fit estimates)
 
 ### Install
 
@@ -54,8 +55,12 @@ METALLAMA_BASE_URL=http://localhost
 |---|---|---|
 | `METALLAMA_LLAMACPP_BINARY` | Path to `llama-server` | _(empty — local servers won't start)_ |
 | `METALLAMA_MODELS_DIR` | Directory for `.gguf` files | _(empty — model picker disabled)_ |
-| `METALLAMA_BASE_URL` | Display URL for endpoints | `http://gpu4.hygeos.com` |
+| `METALLAMA_BASE_URL` | Display URL for endpoints | `http://localhost` |
 | `METALLAMA_ADMIN_PASS_HASH` | Scrypt hash for admin login | _(empty — auth disabled)_ |
+| `METALLAMA_CONFIG_FILE` | Path to the servers config | `config.yaml` (repo root) |
+| `METALLAMA_DL_CONNECTIONS` | Parallel connections for HF downloads | `6` |
+
+Captured llama-server logs are written to `logs/<server>.log` (rewritten on each start).
 
 
 ### Run
@@ -72,15 +77,6 @@ Then open **http://localhost:8010**.
 python hash_password.py    # prompts for a password, prints the hash
 echo 'METALLAMA_ADMIN_PASS_HASH=scrypt$…' >> .env
 ```
-
-## Structure
-
-See [docs/project.md](docs/project.md) for the project structure description
-
-## API
-
-See [docs/api.md](docs/api.md) for the full endpoint reference.
-
 
 ## How It Works
 

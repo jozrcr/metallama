@@ -60,21 +60,6 @@ body {
   line-height: 1.5;
 }
 
-/* ── Banner ─────────────────────────────────────────────── */
-.banner {
-  width: 100%;
-  background: var(--panel);
-  padding: 0;
-}
-
-.banner-img {
-  width: 100%;
-  height: auto;
-  max-height: 80px; 
-  object-fit: contain;
-  display: block;
-}
-
 /* ── Page Header ────────────────────────────────────────── */
 .page-header {
   padding: 1.25rem 0;
@@ -97,9 +82,9 @@ body {
   gap: 1.5rem;
 }
 
-.header-logo {
-  height: 64px;
-  width: auto;
+.header-logo-glyph {
+  font-size: 2.6rem;
+  line-height: 1;
   display: block;
 }
 

@@ -3,21 +3,17 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Metallama &mdash; HYGEOS</title>
+    <title>Metallama</title>
     <link rel="stylesheet" href="/static/styles.css" />
   </head>
   <body>
-    <header class="banner">
-      <img class="banner-img" src="/static/assets/hygeos-banner.png" alt="Hygeos banner" />
-    </header>
-
     <header class="page-header">
       <div class="header-container">
         <div class="header-content">
-          <img id="hero-logo" class="header-logo" src="/static/assets/logo-carre-noir.svg" alt="Hygeos logo" />
+          <span class="header-logo-glyph" aria-hidden="true">🦙</span>
           <div class="header-text">
-            <h1 class="hero-title">Meta-llama</h1>
-            <p class="subtitle">Manage AI models and llamacpp instances</p>
+            <h1 class="hero-title">Metallama</h1>
+            <p class="subtitle">Manage models and llama.cpp instances</p>
           </div>
         </div>
         <div class="header-controls">
@@ -41,14 +37,6 @@
     </header>
 
     <main class="container">
-      <!-- <section class="info-banner">
-        <div class="info-banner-row">
-          <div class="info-banner-block">
-            <span class="info-banner-label">Use LLMs in vscode:</span>
-            <span class="info-banner-label">click model > Manage Language Models > + Add Models > "Ollama" > </span>
-            <code class="info-banner-url">http://gpu4.hygeos.com:8010/ollama</code>
-          </div>
-      </section> -->
       <section>
         <div id="binary-warning" class="binary-warning is-hidden"></div>
         <p id="ui-message" class="ui-message"></p>

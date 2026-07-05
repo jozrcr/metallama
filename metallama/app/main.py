@@ -54,25 +54,9 @@ vram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 ram_history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY_SAMPLES)
 
 
-def server_profiles(service: str | None = None) -> dict[str, Any]:
-    return dict(MODEL_PROFILES)
-
-
-def servers_payload(service: str | None = None) -> list[dict[str, Any]]:
-    return [model_payload(profile) for profile in server_profiles(service).values()]
-
-
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(str(STATIC_DIR / "index.html"))
-
-
-@app.get("/api/config")
-def get_config() -> dict[str, str]:
-    return {
-        "EXECUTABLE_LLAMA": str(Config.EXECUTABLE_LLAMA),
-        "BASE_URL": str(Config.BASE_URL),
-    }
 
 
 @app.get("/api/health")
@@ -248,52 +232,6 @@ async def list_models() -> dict[str, Any]:
     return {"models": managed + remote}
 
 
-@app.get("/api/llm/servers")
-def list_llm_servers() -> dict[str, Any]:
-    return {"servers": servers_payload()}
-
-
-@app.get("/api/servers")
-def list_servers() -> dict[str, Any]:
-    return {"servers": servers_payload()}
-
-
-@app.get("/api/llm/servers/status")
-def list_llm_servers_status() -> dict[str, Any]:
-    return {
-        "servers": [
-            {"id": payload["id"], "status": payload["status"], "pid": payload["pid"], "url": payload["url"]}
-            for payload in servers_payload()
-        ]
-    }
-
-
-@app.get("/api/servers/status")
-def list_servers_status() -> dict[str, Any]:
-    return {
-        "servers": [
-            {"id": payload["id"], "status": payload["status"], "pid": payload["pid"], "url": payload["url"]}
-            for payload in servers_payload()
-        ]
-    }
-
-
-@app.get("/api/llm/servers/{server_id}/status")
-def llm_server_status(server_id: str) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    return model_payload(profile)
-
-
-@app.get("/api/servers/{server_id}/status")
-def server_status(server_id: str) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    return model_payload(profile)
-
-
 @app.post("/api/models/{model_name}/start")
 async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)
@@ -337,24 +275,6 @@ async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> d
     return {"ok": True, "model": model_payload(profile)}
 
 
-@app.post("/api/llm/servers/{server_id}/start")
-async def start_llm_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    result = await start_model(server_id)
-    return {"ok": result["ok"], "server": result["model"]}
-
-
-@app.post("/api/servers/{server_id}/start")
-async def start_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    result = await start_model(server_id)
-    return {"ok": result["ok"], "server": result["model"]}
-
-
 @app.post("/api/models/{model_name}/stop")
 async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)
@@ -381,24 +301,6 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
         runtime_processes.pop(model_name, None)
 
     return {"ok": True, "model": model_payload(profile)}
-
-
-@app.post("/api/llm/servers/{server_id}/stop")
-async def stop_llm_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    result = await stop_model(server_id)
-    return {"ok": result["ok"], "server": result["model"]}
-
-
-@app.post("/api/servers/{server_id}/stop")
-async def stop_server(server_id: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
-    profile = server_profiles().get(server_id)
-    if not profile:
-        raise HTTPException(status_code=404, detail="Unknown server id")
-    result = await stop_model(server_id)
-    return {"ok": result["ok"], "server": result["model"]}
 
 
 @app.post("/api/models/create")
