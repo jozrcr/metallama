@@ -427,12 +427,42 @@ function escapeHtml(s) {
   return d.innerHTML;
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 function canStart(model) {
   return model.status === "offline" && !inFlight.has(model.id);
 }
 
 function canStop(model) {
-  return model.status === "online" && !inFlight.has(model.id);
+  return (model.status === "online" || model.status === "starting") && !inFlight.has(model.id);
+}
+
+function formatElapsed(seconds) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m ? `${m}m ${String(s).padStart(2, "0")}s` : `${s}s`;
+}
+
+function loadingStripHtml(model) {
+  if (model.status !== "starting") return "";
+  const elapsed = model.started_at
+    ? Math.max(0, Math.round(Date.now() / 1000 - model.started_at))
+    : 0;
+  const progress = typeof model.load_progress === "number" ? model.load_progress : null;
+  const pct = progress !== null ? Math.round(progress * 100) : null;
+  const bar =
+    pct !== null
+      ? `<div class="loading-bar"><div class="loading-bar-fill determinate" style="width: ${pct}%"></div></div>`
+      : `<div class="loading-bar"><div class="loading-bar-fill"></div></div>`;
+  const label = pct !== null ? `Loading model… ${pct}% (${formatElapsed(elapsed)})` : `Loading model… ${formatElapsed(elapsed)}`;
+  return `
+    <div class="loading-strip">
+      ${bar}
+      <div class="loading-info">
+        <span class="loading-elapsed">${label}</span>
+        ${model.last_log ? `<span class="loading-lastlog" title="${escapeHtml(model.last_log)}">${escapeHtml(model.last_log)}</span>` : ""}
+      </div>
+    </div>`;
 }
 
 function modelTypeLabel(model) {
@@ -611,7 +641,7 @@ function exitBannerHtml(model) {
 
 function cardTemplate(model) {
   const isManaged = model.managed !== false;
-  const action = model.status === "online" ? "stop" : "start";
+  const action = model.status === "online" || model.status === "starting" ? "stop" : "start";
   const label = action === "stop" ? "Stop" : "Start";
   const canRunAction = action === "stop" ? canStop(model) : canStart(model);
   const type = modelTypeLabel(model);
@@ -659,6 +689,7 @@ function cardTemplate(model) {
           <div class="endpoint-row">
             <span class="endpoint-label">URL:</span>
             <a class="endpoint-link" href="${model.url}" target="_blank">${model.url}</a>
+            ${model.status === "online" ? `<button class="btn-secondary btn-small btn-chat" data-id="${model.id}" data-action="open" data-url="${model.url}" title="Open llama.cpp's chat UI">Chat ↗</button>` : ""}
           </div>
 
           <div class="info-row">
@@ -683,6 +714,7 @@ function cardTemplate(model) {
         </div>
       </div>
 
+      ${loadingStripHtml(model)}
       <p class="${cardErrorClass}" aria-live="polite">${escapeHtml(cardError)}</p>
       ${modelWarning}
       ${exitBannerHtml(model)}
@@ -738,6 +770,26 @@ export async function refreshModels() {
   }
 }
 
+async function waitForStop(modelId) {
+  for (let i = 0; i < 60; i++) {
+    const data = await api(`/api/models/${modelId}/status`);
+    if (data.status === "offline") return;
+    await sleep(500);
+  }
+  throw new Error("Timed out waiting for server to stop (30s).");
+}
+
+// After a start request, only wait until the process is up ("starting" or
+// "online"). Model loading can take minutes; the card's loading strip tracks
+// it, and a crash surfaces through the unexpected-exit banner.
+async function waitForSpawn(modelId) {
+  for (let i = 0; i < 10; i++) {
+    await sleep(500);
+    const data = await api(`/api/models/${modelId}/status`);
+    if (data.status !== "offline") return;
+  }
+}
+
 async function restartModel(modelId) {
   inFlight.set(modelId, "restart");
   await refreshModels();
@@ -745,24 +797,9 @@ async function restartModel(modelId) {
   try {
     await api(`/api/models/${modelId}/stop`, { method: "POST" });
     setCardError(modelId, "");
-
-    for (let i = 0; i < 60; i++) {
-      const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === "offline") break;
-      await new Promise((r) => setTimeout(r, 500));
-    }
-
+    await waitForStop(modelId);
     await api(`/api/models/${modelId}/start`, { method: "POST" });
-
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === "online") return;
-      if (data.status === "offline" && i > 1) {
-        throw new Error("Server process exited during restart — see the error details on the card.");
-      }
-    }
-    throw new Error("Timed out waiting for server to come online after restart (30s).");
+    await waitForSpawn(modelId);
   } finally {
     inFlight.delete(modelId);
     await refreshModels();
@@ -774,27 +811,15 @@ async function startStop(modelId, action) {
     return restartModel(modelId);
   }
 
-  const targetStatus = action === "start" ? "online" : "offline";
   inFlight.set(modelId, action);
   await refreshModels();
   try {
-    const startResp = await api(`/api/models/${modelId}/${action}`, { method: "POST" });
+    await api(`/api/models/${modelId}/${action}`, { method: "POST" });
     setCardError(modelId, "");
-
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 500));
-      const data = await api(`/api/models/${modelId}/status`);
-      if (data.status === targetStatus) {
-        return; // success
-      }
-      // Process died during startup — stop polling and report
-      if (action === "start" && data.status === "offline" && i > 1) {
-        throw new Error("Server process exited during startup — see the error details on the card.");
-      }
-    }
-    // Timed out
     if (action === "start") {
-      throw new Error("Timed out waiting for server to come online (30s).");
+      await waitForSpawn(modelId);
+    } else {
+      await waitForStop(modelId);
     }
   } finally {
     inFlight.delete(modelId);

@@ -29,6 +29,7 @@ from .runtime import (
     build_command_preview,
     cleanup_dead,
     is_alive,
+    is_port_open,
     model_locks,
     model_payload,
     runtime_processes,
@@ -319,6 +320,12 @@ async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> d
         existing = runtime_processes.get(model_name)
         if existing and is_alive(existing.process):
             raise HTTPException(status_code=409, detail="Already running")
+
+        if is_port_open("127.0.0.1", profile.port):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Port {profile.port} is already in use by another process",
+            )
 
         command = build_command(profile)
         try:

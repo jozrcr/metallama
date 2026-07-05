@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import socket
 import subprocess
+
+import httpx
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -10,7 +12,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import Config
-from .logs import get_unexpected_exit
+from .logs import get_unexpected_exit, server_logs
 from .models import ModelProfile, ProcessState
 from .profiles import MODEL_PROFILES
 from .unified_config import load_unified_config
@@ -194,6 +196,16 @@ def build_command(profile: ModelProfile) -> list[str]:
     return cmd
 
 
+_health_client: httpx.Client | None = None
+
+
+def _get_health_client() -> httpx.Client:
+    global _health_client
+    if _health_client is None:
+        _health_client = httpx.Client(timeout=0.5)
+    return _health_client
+
+
 def status_for(profile: ModelProfile) -> str:
     cleanup_dead(profile.name)
     state = runtime_processes.get(profile.name)
@@ -203,7 +215,45 @@ def status_for(profile: ModelProfile) -> str:
     if not is_alive(state.process):
         return "offline"
 
-    return "online" if is_port_open("127.0.0.1", profile.port) else "starting"
+    if not is_port_open("127.0.0.1", profile.port):
+        return "starting"
+
+    # llama-server binds its port before the model is loaded and serves
+    # 503 on /health until it is ready — port-open alone is not "online".
+    try:
+        resp = _get_health_client().get(f"http://127.0.0.1:{profile.port}/health")
+        return "online" if resp.status_code == 200 else "starting"
+    except httpx.HTTPError:
+        return "starting"
+
+
+def _load_progress(profile: ModelProfile, state: ProcessState) -> float | None:
+    """Estimate model-load progress as bytes-read-by-process / model file size.
+
+    Uses /proc/<pid>/io rchar, which tracks read() syscalls — accurate with
+    --no-mmap, an underestimate with mmap (page faults bypass rchar).
+    Returns None when the estimate is unavailable (non-Linux, permissions).
+    """
+    try:
+        rchar: int | None = None
+        with open(f"/proc/{state.process.pid}/io") as fh:
+            for line in fh:
+                if line.startswith("rchar:"):
+                    rchar = int(line.split()[1])
+                    break
+        if rchar is None:
+            return None
+        total = Path(profile.model_path).stat().st_size
+        if profile.model_draft:
+            try:
+                total += Path(profile.model_draft).stat().st_size
+            except OSError:
+                pass
+        if total <= 0:
+            return None
+        return min(rchar / total, 1.0)
+    except (OSError, ValueError):
+        return None
 
 
 def model_payload(profile: ModelProfile) -> dict[str, Any]:
@@ -213,6 +263,17 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
     status = status_for(profile)
     state = runtime_processes.get(profile.name)
     model_found = _binary_exists(str(profile.model_path)) if profile.model_path else False
+
+    last_log = ""
+    load_progress: float | None = None
+    if status == "starting":
+        log = server_logs.get(profile.name)
+        tail = log.tail(1) if log else []
+        last_log = tail[0][1] if tail else ""
+        if state:
+            progress = _load_progress(profile, state)
+            load_progress = round(progress, 3) if progress is not None else None
+
     return {
         "id": profile.name,
         "display_name": profile.name,
@@ -233,4 +294,7 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "model_found": model_found,
         "managed": True,
         "last_exit": get_unexpected_exit(profile.name) if status == "offline" else None,
+        "started_at": state.started_at if state else None,
+        "last_log": last_log,
+        "load_progress": load_progress,
     }
