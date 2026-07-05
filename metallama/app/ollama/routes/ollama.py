@@ -20,7 +20,7 @@ _HEALTH_TIMEOUT = httpx.Timeout(1.0)
 
 
 def _digest(name: str) -> str:
-    return "sha256:" + hashlib.md5(name.encode()).hexdigest()  # noqa: S324 – non-cryptographic identifier
+    return "sha256:" + hashlib.sha256(name.encode()).hexdigest()
 
 
 def _now() -> str:

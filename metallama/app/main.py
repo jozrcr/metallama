@@ -32,6 +32,7 @@ from .runtime import (
     model_locks,
     model_payload,
     runtime_processes,
+    status_for,
 )
 
 app = FastAPI(title="metallama")
@@ -277,7 +278,11 @@ def discard_partial(payload: dict[str, Any] = Body(...), _guard: None = Depends(
 
     models_path = Path(models_dir).resolve()
     target = (models_path / rel_path).resolve()
-    if not str(target).startswith(str(models_path) + "/"):
+    try:
+        os.path.commonpath([str(models_path), str(target)])
+    except ValueError:
+        raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
+    if os.path.commonpath([str(models_path), str(target)]) != str(models_path):
         raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
     if target.suffix != ".partial":
         raise HTTPException(status_code=400, detail="rel_path must point to a .partial file")
@@ -310,7 +315,7 @@ async def list_models() -> dict[str, Any]:
     from .ollama.schemas import SubserverConfig
     import httpx
 
-    managed = [model_payload(profile) for profile in MODEL_PROFILES.values()]
+    managed = await asyncio.gather(*[model_payload(profile) for profile in MODEL_PROFILES.values()])
     cfg = load_unified_config()
     remote = []
     async with httpx.AsyncClient(timeout=httpx.Timeout(2.0)) as client:
@@ -373,7 +378,7 @@ async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> d
             command=command,
         )
 
-    return {"ok": True, "model": model_payload(profile)}
+    return {"ok": True, "model": await model_payload(profile)}
 
 
 @app.post("/api/models/{model_name}/stop")
@@ -386,7 +391,7 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
         cleanup_dead(model_name)
         state = runtime_processes.get(model_name)
         if not state:
-            return {"ok": True, "model": model_payload(profile)}
+            return {"ok": True, "model": await model_payload(profile)}
 
         proc = state.process
         if is_alive(proc):
@@ -401,7 +406,7 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
 
         runtime_processes.pop(model_name, None)
 
-    return {"ok": True, "model": model_payload(profile)}
+    return {"ok": True, "model": await model_payload(profile)}
 
 
 @app.post("/api/models/create")
@@ -460,11 +465,11 @@ async def delete_model(model_name: str, _guard: None = Depends(admin_guard)) -> 
 
 
 @app.get("/api/models/{model_name}/status")
-def model_status(model_name: str) -> dict[str, Any]:
+async def model_status(model_name: str) -> dict[str, Any]:
     profile = MODEL_PROFILES.get(model_name)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model")
-    return model_payload(profile)
+    return await model_payload(profile)
 
 
 @app.get("/api/models/{model_name}/slots")
@@ -477,7 +482,6 @@ async def model_slots(model_name: str) -> Any:
     """
     import httpx
 
-    from .runtime import status_for
     from .unified_config import load_unified_config
 
     # Resolve the upstream /slots URL
@@ -485,7 +489,7 @@ async def model_slots(model_name: str) -> Any:
 
     profile = MODEL_PROFILES.get(model_name)
     if profile:
-        if status_for(profile) != "online":
+        if await status_for(profile) != "online":
             raise HTTPException(status_code=503, detail="Server not online")
         slots_url = f"http://127.0.0.1:{profile.port}/slots"
     else:

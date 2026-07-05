@@ -24,6 +24,38 @@ runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
 
 
+# Dangerous flags that could expose the server or cause file access issues
+_DANGEROUS_FLAGS = frozenset({
+    "--host",           # Could bind to 0.0.0.0
+    "--log-file",       # Could write to arbitrary paths
+    "--save-loadstate", # Could write to arbitrary paths
+    "--control-vector", # Could load arbitrary files
+    "--in-prefix",      # Unnecessary attack surface
+})
+
+
+def _sanitize_args(args: list[str]) -> list[str]:
+    """Remove dangerous flags that could be injected via config.
+
+    Returns a filtered list with dangerous flags and their values stripped.
+    """
+    result: list[str] = []
+    skip_next = False
+    for i, arg in enumerate(args):
+        if skip_next:
+            skip_next = False
+            continue
+        # Check for --flag value and --flag=value forms
+        flag = arg.split("=")[0] if "=" in arg else arg
+        if flag in _DANGEROUS_FLAGS:
+            # For --flag value form, skip the next arg too
+            if "=" not in arg:
+                skip_next = True
+            continue
+        result.append(arg)
+    return result
+
+
 def _get_engine_default_args(engine: str) -> list[str]:
     """Get default CLI args for an engine from unified config."""
     config = load_unified_config()
@@ -60,6 +92,11 @@ def is_alive(proc: subprocess.Popen[str]) -> bool:
 def cleanup_dead(model_name: str) -> None:
     state = runtime_processes.get(model_name)
     if state and not is_alive(state.process):
+        # Reap zombie process by calling wait() (poll() alone may not fully reap)
+        try:
+            state.process.wait()
+        except subprocess.SubprocessError:
+            pass
         runtime_processes.pop(model_name, None)
 
 
@@ -131,6 +168,7 @@ def build_command_preview(profile: ModelProfile) -> tuple[list[str], bool]:
         for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
         for token in arg.split()
     ]
+    extra_args = _sanitize_args(extra_args)
 
     if profile.engine == "llama" and profile.context_window is not None:
         extra_args = _strip_flag(extra_args, "--ctx-size")
@@ -175,6 +213,7 @@ def build_command(profile: ModelProfile) -> list[str]:
         for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
         for token in arg.split()
     ]
+    extra_args = _sanitize_args(extra_args)
 
     if profile.engine == "llama" and profile.context_window is not None:
         extra_args = _strip_flag(extra_args, "--ctx-size")
@@ -198,17 +237,17 @@ def build_command(profile: ModelProfile) -> list[str]:
     return cmd
 
 
-_health_client: httpx.Client | None = None
+async def _health_check(port: int) -> bool:
+    """Async health check for a llama-server port (non-blocking)."""
+    try:
+        async with httpx.AsyncClient(timeout=0.5) as client:
+            resp = await client.get(f"http://127.0.0.1:{port}/health")
+            return resp.status_code == 200
+    except httpx.HTTPError:
+        return False
 
 
-def _get_health_client() -> httpx.Client:
-    global _health_client
-    if _health_client is None:
-        _health_client = httpx.Client(timeout=0.5)
-    return _health_client
-
-
-def status_for(profile: ModelProfile) -> str:
+async def status_for(profile: ModelProfile) -> str:
     cleanup_dead(profile.name)
     state = runtime_processes.get(profile.name)
 
@@ -222,11 +261,8 @@ def status_for(profile: ModelProfile) -> str:
 
     # llama-server binds its port before the model is loaded and serves
     # 503 on /health until it is ready — port-open alone is not "online".
-    try:
-        resp = _get_health_client().get(f"http://127.0.0.1:{profile.port}/health")
-        return "online" if resp.status_code == 200 else "starting"
-    except httpx.HTTPError:
-        return "starting"
+    healthy = await _health_check(profile.port)
+    return "online" if healthy else "starting"
 
 
 # Approximate bytes per KV-cache element for llama.cpp --cache-type-k/v values
@@ -307,11 +343,11 @@ def _load_progress(profile: ModelProfile, state: ProcessState) -> float | None:
         return None
 
 
-def model_payload(profile: ModelProfile) -> dict[str, Any]:
+async def model_payload(profile: ModelProfile) -> dict[str, Any]:
     # Get the profile with latest context_window from config
     profile = get_profile_with_config(profile)
     
-    status = status_for(profile)
+    status = await status_for(profile)
     state = runtime_processes.get(profile.name)
     model_found = _binary_exists(str(profile.model_path)) if profile.model_path else False
 

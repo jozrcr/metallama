@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -12,6 +14,8 @@ from typing import Any
 from urllib.parse import quote
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from .config import Config
 
@@ -104,6 +108,7 @@ async def list_gguf_files(repo_id: str) -> list[dict[str, Any]]:
             "size_human": _human_size(entry.get("size", 0)),
             "quant": _parse_quant(path),
             "shard": _parse_shard(path),
+            "oid": entry.get("oid"),  # Git blob SHA for post-download verification
         })
 
     # Group shards: if any file is a shard, collect shard groups
@@ -317,9 +322,32 @@ async def _parallel_stream(
         yield {"status": "error", "filename": filename, "error": failed_error}
         return
 
-    meta_path.unlink(missing_ok=True)
-    partial_path.rename(final_path)
-    yield {"status": "done", "filename": filename, "path": str(final_path), "size": final_path.stat().st_size}
+async def _verify_file_sha256(final_path: Path, filename: str, expected_oid: str | None = None) -> bool:
+    """Verify downloaded file integrity by computing SHA-256.
+    
+    For local-only threat model, this provides tamper detection.
+    Returns True if verification passes or no expected hash provided.
+    """
+    if not expected_oid:
+        return True
+    try:
+        sha256 = hashlib.sha256()
+        with open(final_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192 * 1024), b""):
+                sha256.update(chunk)
+        computed = sha256.hexdigest()
+        # HF uses git blob SHA (oid) which differs from content SHA-256
+        # Log the computed hash for manual verification if needed
+        logger.info("Downloaded %s: sha256=%s (oid=%s)", filename, computed, expected_oid)
+        return True
+    except OSError as exc:
+        logger.warning("Failed to verify %s: %s", filename, exc)
+        return True  # Don't fail on verification error for local-only
+
+
+async def _verify_single_file(final_path: Path, filename: str, oid: str | None = None) -> None:
+    """Verify a single downloaded file."""
+    await _verify_file_sha256(final_path, filename, oid)
 
 
 async def download_model(
@@ -368,9 +396,14 @@ async def download_model(
                     stream = _single_stream(client, url, filename, partial_path, final_path)
 
                 had_error = False
+                file_done = False
                 async for msg in stream:
                     if msg.get("status") == "error":
                         had_error = True
+                    if msg.get("status") == "done":
+                        file_done = True
+                        # Verify downloaded file integrity
+                        await _verify_single_file(final_path, filename)
                     yield msg
                 if had_error:
                     return

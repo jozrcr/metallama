@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 # Overridable so tests / secondary instances can use an isolated config file
 # instead of the shared repo-root config.yaml.
@@ -76,6 +79,7 @@ def load_unified_config(path: str | Path | None = None) -> UnifiedConfig:
         return _CONFIG_CACHE[cache_key]
 
     if not config_path.exists():
+        logger.info("Config file not found at %s, using defaults", config_path)
         config = UnifiedConfig()
         _CONFIG_CACHE[cache_key] = config
         return config
@@ -83,10 +87,14 @@ def load_unified_config(path: str | Path | None = None) -> UnifiedConfig:
     try:
         with config_path.open() as fh:
             raw = yaml.safe_load(fh) or {}
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to parse config file %s: %s — using defaults", config_path, exc)
         config = UnifiedConfig()
         _CONFIG_CACHE[cache_key] = config
         return config
+
+    if not raw:
+        logger.info("Config file %s is empty — using defaults", config_path)
 
     # Use `or {}` / `or []` to handle None from YAML (e.g. key present but empty)
     engine_defaults_raw = raw.get("engine_defaults") or {}

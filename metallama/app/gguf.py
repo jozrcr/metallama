@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import struct
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -40,8 +41,9 @@ def _skip_value(f: BinaryIO, vtype: int) -> None:
         raise ValueError(f"Unknown GGUF value type {vtype}")
 
 
-# (path, mtime, size) -> metadata dict
-_META_CACHE: dict[tuple[str, float, int], dict[str, Any] | None] = {}
+# (path, mtime, size) -> metadata dict (bounded LRU cache)
+_META_CACHE: OrderedDict[tuple[str, float, int], dict[str, Any] | None] = OrderedDict()
+_MAX_CACHE_SIZE = 64  # Prevent unbounded memory growth
 
 
 def read_metadata(path: str | Path) -> dict[str, Any] | None:
@@ -57,6 +59,8 @@ def read_metadata(path: str | Path) -> dict[str, Any] | None:
         return None
     cache_key = (str(p), stat.st_mtime, stat.st_size)
     if cache_key in _META_CACHE:
+        # Move to end (most recently used)
+        _META_CACHE.move_to_end(cache_key)
         return _META_CACHE[cache_key]
 
     meta: dict[str, Any] | None = {}
@@ -80,6 +84,10 @@ def read_metadata(path: str | Path) -> dict[str, Any] | None:
                     _skip_value(f, vtype)
     except (OSError, ValueError, struct.error):
         meta = None
+
+    # Evict oldest entries if cache exceeds max size
+    while len(_META_CACHE) >= _MAX_CACHE_SIZE:
+        _META_CACHE.popitem(last=False)
 
     _META_CACHE[cache_key] = meta
     return meta
