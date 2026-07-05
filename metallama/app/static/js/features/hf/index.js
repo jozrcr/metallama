@@ -1,5 +1,6 @@
 import { api } from "../../core/api.js";
 import { setConfigMessage } from "../../core/uiMessage.js";
+import { openCreateForModel } from "../models/index.js";
 
 const PANEL_ID = "hf-panel";
 const SEARCH_ID = "hf-search";
@@ -201,6 +202,7 @@ async function startDownload(repoId, filenames, btn, label) {
   // Track per-file progress
   const fileProgress = {};
   filenames.forEach((f) => (fileProgress[f] = { total: 0, completed: 0 }));
+  let downloadedPath = null; // absolute path of the first completed file
 
   try {
     const resp = await fetch("/api/hf/download", {
@@ -238,6 +240,7 @@ async function startDownload(repoId, filenames, btn, label) {
           fileProgress[fname] = { total: msg.total, completed: msg.completed };
         } else if (msg.status === "done") {
           fileProgress[fname] = { total: msg.size, completed: msg.size };
+          if (!downloadedPath && msg.path) downloadedPath = msg.path;
         } else if (msg.status === "error") {
           throw new Error(msg.error || "Download error");
         }
@@ -257,10 +260,21 @@ async function startDownload(repoId, filenames, btn, label) {
     dlFill.style.width = "100%";
     dlFill.classList.add("done");
     dlText.textContent = "✓ Done";
-    btn.textContent = "Done";
-    btn.classList.remove("btn-secondary");
-    btn.classList.add("btn-primary");
     setConfigMessage(`Downloaded: ${filenames.length === 1 ? filenames[0].split("/").pop() : filenames.length + " files"}`);
+
+    invalidateModelFilesCache();
+
+    // Swap the Download button for a Create Server shortcut
+    // (cloneNode drops the download click listener)
+    const createBtn = btn.cloneNode(true);
+    btn.replaceWith(createBtn);
+    createBtn.disabled = false;
+    createBtn.textContent = "+ Create Server";
+    createBtn.title = "Create a server for the downloaded model";
+    createBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      openCreateForModel(downloadedPath || "");
+    });
 
     // Fade out the download bar after 5s
     setTimeout(() => {
@@ -273,8 +287,6 @@ async function startDownload(repoId, filenames, btn, label) {
         }
       }, 600);
     }, 5000);
-
-    invalidateModelFilesCache();
   } catch (err) {
     dlFill.classList.add("error");
     dlText.textContent = `Error: ${err.message}`;

@@ -190,6 +190,21 @@ def get_ram_history() -> dict[str, Any]:
     return {"history": list(ram_history)}
 
 
+@app.get("/api/ports/suggest")
+def suggest_port() -> dict[str, Any]:
+    """Suggest a free port: not taken by a configured server, not open on the OS."""
+    from .unified_config import load_unified_config
+
+    cfg = load_unified_config()
+    taken = {s.port for s in cfg.managed_servers}
+    port = 8080
+    while port in taken or is_port_open("127.0.0.1", port):
+        port += 1
+        if port > 65535:
+            raise HTTPException(status_code=500, detail="No free port found")
+    return {"port": port}
+
+
 @app.get("/api/model-files")
 def list_model_files() -> dict[str, Any]:
     """Scan METALLAMA_MODELS_DIR for .gguf files and return their paths."""

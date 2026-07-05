@@ -228,7 +228,7 @@ function openEditModal(modelId, isManaged) {
   });
 }
 
-function openCreateModal(type) {
+function openCreateModal(type, prefill = null) {
   modalMode = "create";
   editingModelId = null;
   const isManaged = type === "managed";
@@ -244,23 +244,31 @@ function openCreateModal(type) {
   document.getElementById("modal-title").textContent = isManaged ? "Add Local Server" : "Add Remote Server";
   if (isManaged) {
     loadModelFiles().then((mdata) => {
-      populateModelSelector(mdata.files || [], "");
+      populateModelSelector(mdata.files || [], prefill?.model_path || "");
       populateModelDraftSelector(mdata.files || [], "");
+      if (prefill?.model_path) {
+        const stem = prefill.model_path.replace(/^.*[\\/]/, "").replace(/\.gguf$/i, "");
+        document.getElementById("edit-name").value = stem;
+      }
     });
-    // Pre-fill defaults: port = max + 1, CTX = 32K, PAR = 2
-    api("/api/models").then((data) => {
-      const models = data.models || [];
-      const maxPort = models.reduce((max, m) => {
-        if (m.managed && m.port && m.port > max) return m.port;
-        return max;
-      }, 0);
-      document.getElementById("edit-port").value = maxPort > 0 ? maxPort + 1 : 8080;
-      document.getElementById("edit-context-window").value = 32000;
-      document.getElementById("edit-parallel").value = 2;
-    });
+    // Pre-fill defaults: backend-suggested free port, CTX = 32K, PAR = 1
+    api("/api/ports/suggest")
+      .then((data) => {
+        document.getElementById("edit-port").value = data.port;
+      })
+      .catch(() => {
+        document.getElementById("edit-port").value = 8080;
+      });
+    document.getElementById("edit-context-window").value = 32000;
+    document.getElementById("edit-parallel").value = 1;
   }
   document.getElementById("edit-modal").classList.remove("is-hidden");
   document.getElementById("modal-delete-btn").classList.add("is-hidden");
+}
+
+// Open the create modal pre-filled for a freshly downloaded model file.
+export function openCreateForModel(modelPath) {
+  openCreateModal("managed", { model_path: modelPath });
 }
 
 function closeEditModal() {
