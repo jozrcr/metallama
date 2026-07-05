@@ -1,6 +1,7 @@
 import { api } from "../../core/api.js";
 import { setConfigMessage } from "../../core/uiMessage.js";
 import { openCreateForModel } from "../models/index.js";
+import { refreshLibrary } from "../library/index.js";
 
 const PANEL_ID = "hf-panel";
 const SEARCH_ID = "hf-search";
@@ -43,6 +44,10 @@ export function setupHfSearch() {
       hideResults();
     }
   });
+
+  // Let the library panel resume interrupted downloads
+  window.__metallamaResumeDownload = (repoId, filenames, label) =>
+    startDownload(repoId, filenames, null, label);
 
   // Closing the tab kills in-progress downloads (partials are kept and
   // resumable, but the user should know).
@@ -319,15 +324,17 @@ async function startDownload(repoId, filenames, btn, label) {
 
     // Swap the Download button for a Create Server shortcut
     // (cloneNode drops the download click listener)
-    const createBtn = btn.cloneNode(true);
-    btn.replaceWith(createBtn);
-    createBtn.disabled = false;
-    createBtn.textContent = "+ Create Server";
-    createBtn.title = "Create a server for the downloaded model";
-    createBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      openCreateForModel(downloadedPath || "");
-    });
+    if (btn) {
+      const createBtn = btn.cloneNode(true);
+      btn.replaceWith(createBtn);
+      createBtn.disabled = false;
+      createBtn.textContent = "+ Create Server";
+      createBtn.title = "Create a server for the downloaded model";
+      createBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openCreateForModel(downloadedPath || "");
+      });
+    }
 
     // Fade out the download bar after 5s
     setTimeout(() => {
@@ -344,18 +351,17 @@ async function startDownload(repoId, filenames, btn, label) {
     dlFill.classList.add("error");
     if (err.name === "AbortError") {
       dlText.textContent = "Cancelled — partial file kept";
-      btn.textContent = "Resume";
-      btn.disabled = false;
+      if (btn) { btn.textContent = "Resume"; btn.disabled = false; }
       setConfigMessage("Download cancelled — Resume continues from the partial file");
     } else {
       dlText.textContent = `Error: ${err.message}`;
-      btn.textContent = "Retry";
-      btn.disabled = false;
+      if (btn) { btn.textContent = "Retry"; btn.disabled = false; }
       setConfigMessage(err.message, true);
     }
   } finally {
     activeDownloads.delete(downloadId);
     if (cancelBtn) cancelBtn.classList.add("is-hidden");
+    refreshLibrary().catch(() => {});
   }
 }
 

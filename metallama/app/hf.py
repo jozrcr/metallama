@@ -165,11 +165,14 @@ def _load_block_meta(meta_path: Path, total: int) -> set[int]:
     return set()
 
 
-def _save_block_meta(meta_path: Path, total: int, done: set[int]) -> None:
+def _save_block_meta(
+    meta_path: Path, total: int, done: set[int], source: dict[str, str] | None = None
+) -> None:
     try:
-        meta_path.write_text(
-            json.dumps({"block_size": _DL_BLOCK_SIZE, "total": total, "done": sorted(done)})
-        )
+        payload: dict = {"block_size": _DL_BLOCK_SIZE, "total": total, "done": sorted(done)}
+        if source:
+            payload.update(source)
+        meta_path.write_text(json.dumps(payload))
     except OSError:
         pass
 
@@ -223,6 +226,7 @@ async def _parallel_stream(
     meta_path: Path,
     final_path: Path,
     total: int,
+    source: dict[str, str] | None = None,
 ):
     """Download *url* as parallel 32MB range requests into a preallocated file."""
     from collections import deque
@@ -275,7 +279,7 @@ async def _parallel_stream(
                         if got != end - start + 1:
                             raise RuntimeError(f"short read on block {idx}")
                         done.add(idx)
-                        _save_block_meta(meta_path, total, done)
+                        _save_block_meta(meta_path, total, done, source)
                         break
                     except asyncio.CancelledError:
                         state["completed"] -= got
@@ -307,7 +311,7 @@ async def _parallel_stream(
                 pass
         os.close(fd)
         if len(done) < n_blocks:
-            _save_block_meta(meta_path, total, done)
+            _save_block_meta(meta_path, total, done, source)
 
     if failed_error:
         yield {"status": "error", "filename": filename, "error": failed_error}
@@ -357,7 +361,8 @@ async def download_model(
                 total, supports_range = await _probe(client, url)
                 if supports_range and total > _DL_BLOCK_SIZE:
                     stream = _parallel_stream(
-                        client, url, filename, partial_path, meta_path, final_path, total
+                        client, url, filename, partial_path, meta_path, final_path, total,
+                        source={"repo_id": repo_id, "filename": filename},
                     )
                 else:
                     stream = _single_stream(client, url, filename, partial_path, final_path)

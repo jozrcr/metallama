@@ -189,6 +189,109 @@ def suggest_port() -> dict[str, Any]:
     return {"port": port}
 
 
+@app.get("/api/library")
+def model_library() -> dict[str, Any]:
+    """Inventory of the models directory: downloaded GGUFs (with GGUF metadata
+    and which servers use them) and in-progress/partial downloads."""
+    import json as _json
+
+    from .gguf import read_metadata
+    from .unified_config import load_unified_config
+
+    models_dir = Config.MODELS_DIR
+    if not models_dir or not Path(models_dir).is_dir():
+        return {"models": [], "partials": [], "models_dir": models_dir}
+    models_path = Path(models_dir)
+
+    cfg = load_unified_config()
+    used_by: dict[str, list[str]] = {}
+    for server in cfg.managed_servers:
+        for p in (server.model_path, server.model_draft):
+            if p:
+                try:
+                    used_by.setdefault(str(Path(p).resolve()), []).append(server.name)
+                except OSError:
+                    pass
+
+    models = []
+    for p in sorted(models_path.rglob("*.gguf")):
+        try:
+            size = p.stat().st_size
+        except OSError:
+            continue
+        meta = read_metadata(p) or {}
+        models.append({
+            "name": p.stem,
+            "path": str(p),
+            "rel_path": str(p.relative_to(models_path)),
+            "size_bytes": size,
+            "size_gb": round(size / 1024**3, 1),
+            "arch": meta.get("general.architecture"),
+            "params": meta.get("general.size_label"),
+            "servers": used_by.get(str(p.resolve()), []),
+        })
+
+    partials = []
+    for p in sorted(models_path.rglob("*.partial")):
+        meta_path = p.with_name(p.name + ".meta")
+        total = completed = 0
+        repo_id = hf_filename = None
+        try:
+            if meta_path.exists():
+                raw = _json.loads(meta_path.read_text())
+                total = int(raw.get("total", 0))
+                block = int(raw.get("block_size", 1)) or 1
+                done = raw.get("done", [])
+                repo_id = raw.get("repo_id")
+                hf_filename = raw.get("filename")
+                n_blocks = (total + block - 1) // block if total else 0
+                completed = sum(
+                    min(total, (int(i) + 1) * block) - int(i) * block
+                    for i in done
+                    if int(i) < n_blocks
+                )
+            else:
+                completed = p.stat().st_size  # legacy contiguous partial
+        except (OSError, ValueError):
+            pass
+        partials.append({
+            "name": p.name.removesuffix(".partial").removesuffix(".gguf"),
+            "rel_path": str(p.relative_to(models_path)),
+            "total_bytes": total,
+            "completed_bytes": completed,
+            "percent": round(completed / total * 100, 1) if total else None,
+            "repo_id": repo_id,
+            "filename": hf_filename,
+        })
+
+    return {"models": models, "partials": partials, "models_dir": str(models_path)}
+
+
+@app.post("/api/library/partials/discard")
+def discard_partial(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    """Delete a .partial file (and its .meta sidecar) from the models dir."""
+    rel_path = payload.get("rel_path", "")
+    if not rel_path or not isinstance(rel_path, str):
+        raise HTTPException(status_code=400, detail="rel_path is required")
+    models_dir = Config.MODELS_DIR
+    if not models_dir:
+        raise HTTPException(status_code=400, detail="METALLAMA_MODELS_DIR is not set")
+
+    models_path = Path(models_dir).resolve()
+    target = (models_path / rel_path).resolve()
+    if not str(target).startswith(str(models_path) + "/"):
+        raise HTTPException(status_code=400, detail="rel_path escapes the models directory")
+    if target.suffix != ".partial":
+        raise HTTPException(status_code=400, detail="rel_path must point to a .partial file")
+    if not target.exists():
+        raise HTTPException(status_code=404, detail="Partial file not found")
+
+    target.unlink()
+    meta = target.with_name(target.name + ".meta")
+    meta.unlink(missing_ok=True)
+    return {"ok": True, "discarded": rel_path}
+
+
 @app.get("/api/model-files")
 def list_model_files() -> dict[str, Any]:
     """Scan METALLAMA_MODELS_DIR for .gguf files and return their paths."""

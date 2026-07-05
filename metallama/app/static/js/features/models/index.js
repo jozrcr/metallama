@@ -14,6 +14,8 @@ let logTimer = null;
 const LOG_POLL_INTERVAL = 1000; // ms
 const LOG_TEXT_CAP = 500000; // chars kept per panel
 const slotCache = new Map(); // modelId -> { slots: [...], ts: number }
+let filterText = ""; // server name filter
+let filterStatus = "all"; // all | running | offline
 let lastSlotRefresh = 0;
 const SLOT_REFRESH_INTERVAL = 5000; // ms — avoid hammering /slots during inference
 
@@ -283,6 +285,7 @@ async function deleteModal() {
   try {
     await api(`/api/models/${encodeURIComponent(name)}`, { method: "DELETE" });
     setConfigMessage(`Server "${name}" deleted`);
+      window.__metallamaRefreshLibrary?.();
     closeEditModal();
     await refreshModels();
   } catch (err) {
@@ -392,6 +395,7 @@ async function saveCreateModal() {
         body: JSON.stringify(payload),
       });
       setConfigMessage(`Server "${newName}" created`);
+      window.__metallamaRefreshLibrary?.();
       closeEditModal();
       await refreshModels();
     } catch (err) {
@@ -409,6 +413,7 @@ async function saveCreateModal() {
         body: JSON.stringify({ type: "remote", name: newName, url: newUrl }),
       });
       setConfigMessage(`Remote server "${newName}" created`);
+      window.__metallamaRefreshLibrary?.();
       closeEditModal();
       await refreshModels();
     } catch (err) {
@@ -737,7 +742,13 @@ function cardTemplate(model) {
       <p class="${cardErrorClass}" aria-live="polite">${escapeHtml(cardError)}</p>
       ${modelWarning}
       ${exitBannerHtml(model)}
-      ${isManaged ? `<div class="log-panel ${openLogs.has(model.id) ? "" : "is-hidden"}" data-log-model="${model.id}"><pre class="log-output"></pre></div>` : ""}
+      ${isManaged ? `<div class="log-panel ${openLogs.has(model.id) ? "" : "is-hidden"}" data-log-model="${model.id}">
+        <div class="log-panel-head">
+          <span class="log-panel-title">Server logs</span>
+          <a class="log-open-page" href="/static/logs.html?model=${encodeURIComponent(model.id)}" target="_blank" rel="noopener" title="Open full log view in a new tab">Full view ↗</a>
+        </div>
+        <pre class="log-output"></pre>
+      </div>` : ""}
 
       <div class="${overlayClass}">
         <div class="overlay-content">
@@ -763,10 +774,19 @@ function renderModels(models) {
   }
   ensureLogTimer();
 
-  modelsEl.innerHTML = models.map(cardTemplate).join("");
+  const needle = filterText.trim().toLowerCase();
+  const visible = models.filter((m) => {
+    if (needle && !`${m.display_name} ${modelStem(m)}`.toLowerCase().includes(needle)) return false;
+    if (filterStatus === "running") return m.status === "online" || m.status === "starting";
+    if (filterStatus === "offline") return m.status === "offline";
+    return true;
+  });
+
+  modelsEl.innerHTML = visible.map(cardTemplate).join("");
   hydrateLogPanels();
+  document.getElementById("models-filter-empty")?.classList.toggle("is-hidden", visible.length > 0 || models.length === 0);
   const running = models.filter((m) => m.status === "online").length;
-  summaryEl.textContent = `${running} / ${models.length} ACTIVE SERVERS`;
+  summaryEl.textContent = `${running} / ${models.length} running`;
 }
 
 export async function refreshModels() {
@@ -964,6 +984,24 @@ export function setupModels() {
       }
     });
   }
+
+  // ── Server filter controls ────────────────────────────
+  const filterInput = document.getElementById("server-filter");
+  if (filterInput) {
+    filterInput.addEventListener("input", () => {
+      filterText = filterInput.value;
+      refreshModels().catch(() => {});
+    });
+  }
+  document.querySelectorAll(".status-filter .chip-btn").forEach((chip) => {
+    chip.addEventListener("click", () => {
+      filterStatus = chip.dataset.status || "all";
+      document.querySelectorAll(".status-filter .chip-btn").forEach((c) => {
+        c.classList.toggle("active", c === chip);
+      });
+      refreshModels().catch(() => {});
+    });
+  });
 
   // ── Add Server button ─────────────────────────────────
   const addBtn = document.getElementById("add-model-btn");
