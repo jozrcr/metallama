@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from .config import Config
+from .logs import get_unexpected_exit
 from .models import ModelProfile, ProcessState
 from .profiles import MODEL_PROFILES
 from .unified_config import load_unified_config
@@ -231,4 +232,5 @@ def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "model_draft": profile.model_draft,
         "model_found": model_found,
         "managed": True,
+        "last_exit": get_unexpected_exit(profile.name) if status == "offline" else None,
     }

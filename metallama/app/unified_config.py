@@ -269,7 +269,7 @@ def save_unified_config(config: UnifiedConfig, path: str | Path = "config.yaml")
         lines.append(f"    port: {server.port}")
         if server.engine != "llama":
             lines.append(f'    engine: "{server.engine}"')
-        lines.append(f"    context_window: {server.context_window}")
+        lines.append(f"    context_window: {'null' if server.context_window is None else server.context_window}")
         lines.append(f"    parallel: {server.parallel}")
         if server.extra_args:
             lines.append("    extra_args:")

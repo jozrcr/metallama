@@ -1406,3 +1406,70 @@ body.admin-locked .disabled-readonly {
   flex: 1;
   min-width: 0;
 }
+
+/* ── Server logs panel ─────────────────────────────────── */
+.log-panel {
+  margin-top: 0.15rem;
+}
+
+.log-output {
+  margin: 0;
+  padding: 0.55rem 0.65rem;
+  max-height: 260px;
+  overflow: auto;
+  border: var(--border-size) solid var(--line);
+  background: color-mix(in srgb, var(--bg) 60%, var(--panel));
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.btn-secondary.active {
+  background: var(--bg-active);
+  border-color: var(--blue);
+}
+
+/* ── Unexpected-exit banner ────────────────────────────── */
+.card-exit-banner {
+  border: var(--border-size) solid color-mix(in srgb, var(--red) 75%, var(--line));
+  background: color-mix(in srgb, var(--red) 10%, var(--panel));
+}
+
+.exit-banner-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.65rem;
+}
+
+.exit-banner-title {
+  color: color-mix(in srgb, var(--red) 85%, var(--text));
+  font-weight: 800;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.exit-banner-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-shrink: 0;
+}
+
+.exit-banner-tail {
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  border-top: var(--border-size) solid color-mix(in srgb, var(--red) 40%, var(--line));
+  font-family: ui-monospace, monospace;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow: auto;
+}

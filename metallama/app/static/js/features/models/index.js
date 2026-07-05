@@ -7,6 +7,12 @@ const summaryEl = document.getElementById("summary");
 
 const inFlight = new Map(); // modelId -> "start" | "stop"
 const cardErrors = new Map();
+const openLogs = new Set(); // modelIds with an open log panel
+const logState = new Map(); // modelId -> { since, text, pinned }
+const dismissedExits = new Map(); // modelId -> last_exit.at that the user dismissed
+let logTimer = null;
+const LOG_POLL_INTERVAL = 1000; // ms
+const LOG_TEXT_CAP = 500000; // chars kept per panel
 const slotCache = new Map(); // modelId -> { slots: [...], ts: number }
 let lastSlotRefresh = 0;
 const SLOT_REFRESH_INTERVAL = 5000; // ms — avoid hammering /slots during inference
@@ -519,6 +525,90 @@ function updateSlotIndicators() {
   });
 }
 
+// ── Server logs panel ─────────────────────────────────────
+function updateLogPanel(modelId) {
+  const panel = document.querySelector(`.log-panel[data-log-model="${CSS.escape(modelId)}"]`);
+  if (!panel) return;
+  const pre = panel.querySelector(".log-output");
+  const st = logState.get(modelId);
+  if (!pre || !st) return;
+  pre.textContent = st.text || "(no output yet)";
+  pre.onscroll = () => {
+    st.pinned = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+  };
+  if (st.pinned !== false) pre.scrollTop = pre.scrollHeight;
+}
+
+function hydrateLogPanels() {
+  for (const id of openLogs) updateLogPanel(id);
+}
+
+async function pollLogs() {
+  for (const id of openLogs) {
+    const st = logState.get(id);
+    if (!st) continue;
+    try {
+      const data = await api(`/api/models/${encodeURIComponent(id)}/logs?since=${st.since}`);
+      const lines = data.lines || [];
+      if (lines.length) {
+        st.text += (st.text ? "\n" : "") + lines.map((l) => l.text).join("\n");
+        if (st.text.length > LOG_TEXT_CAP) {
+          st.text = st.text.slice(st.text.indexOf("\n", st.text.length - LOG_TEXT_CAP) + 1);
+        }
+        st.since = data.next;
+        updateLogPanel(id);
+      }
+    } catch {
+      // server unreachable or model deleted — keep panel, retry next tick
+    }
+  }
+}
+
+function ensureLogTimer() {
+  if (openLogs.size && !logTimer) {
+    logTimer = setInterval(() => pollLogs().catch(() => {}), LOG_POLL_INTERVAL);
+  } else if (!openLogs.size && logTimer) {
+    clearInterval(logTimer);
+    logTimer = null;
+  }
+}
+
+async function toggleLogs(modelId) {
+  if (openLogs.has(modelId)) {
+    openLogs.delete(modelId);
+    document
+      .querySelector(`.log-panel[data-log-model="${CSS.escape(modelId)}"]`)
+      ?.classList.add("is-hidden");
+  } else {
+    openLogs.add(modelId);
+    logState.set(modelId, { since: 0, text: "", pinned: true });
+    document
+      .querySelector(`.log-panel[data-log-model="${CSS.escape(modelId)}"]`)
+      ?.classList.remove("is-hidden");
+    await pollLogs().catch(() => {});
+    updateLogPanel(modelId);
+  }
+  ensureLogTimer();
+}
+
+function exitBannerHtml(model) {
+  const exit = model.last_exit;
+  if (!exit) return "";
+  if (dismissedExits.get(model.id) === String(exit.at)) return "";
+  const tail = (exit.tail || []).slice(-5).join("\n");
+  return `
+    <div class="card-exit-banner">
+      <div class="exit-banner-head">
+        <span class="exit-banner-title">⚠ Server exited unexpectedly (exit code ${exit.code})</span>
+        <span class="exit-banner-actions">
+          <button class="btn-secondary btn-small" data-id="${model.id}" data-action="logs">Logs</button>
+          <button class="btn-secondary btn-small" data-id="${model.id}" data-action="dismiss-exit" data-at="${exit.at}">Dismiss</button>
+        </span>
+      </div>
+      ${tail ? `<pre class="exit-banner-tail">${escapeHtml(tail)}</pre>` : ""}
+    </div>`;
+}
+
 function cardTemplate(model) {
   const isManaged = model.managed !== false;
   const action = model.status === "online" ? "stop" : "start";
@@ -575,6 +665,7 @@ function cardTemplate(model) {
             ${isManaged && model.pid !== undefined ? `<span class="info-item">PID: ${model.pid ?? "-"}</span>` : ""}
             ${ctxDisplay}
             ${isManaged ? `<button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>` : ""}
+            ${isManaged ? `<button class="btn-secondary btn-small ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">Logs</button>` : ""}
             <button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">Edit</button>
           </div>
         </div>
@@ -592,8 +683,10 @@ function cardTemplate(model) {
         </div>
       </div>
 
-      <p class="${cardErrorClass}" aria-live="polite">${cardError}</p>
+      <p class="${cardErrorClass}" aria-live="polite">${escapeHtml(cardError)}</p>
       ${modelWarning}
+      ${exitBannerHtml(model)}
+      ${isManaged ? `<div class="log-panel ${openLogs.has(model.id) ? "" : "is-hidden"}" data-log-model="${model.id}"><pre class="log-output"></pre></div>` : ""}
 
       <div class="${overlayClass}">
         <div class="overlay-content">
@@ -610,7 +703,17 @@ function renderModels(models) {
     return;
   }
 
+  // Drop log-panel state for models that no longer exist
+  for (const id of openLogs) {
+    if (!models.some((m) => m.id === id)) {
+      openLogs.delete(id);
+      logState.delete(id);
+    }
+  }
+  ensureLogTimer();
+
   modelsEl.innerHTML = models.map(cardTemplate).join("");
+  hydrateLogPanels();
   const running = models.filter((m) => m.status === "online").length;
   summaryEl.textContent = `${running} / ${models.length} ACTIVE SERVERS`;
 }
@@ -656,7 +759,7 @@ async function restartModel(modelId) {
       const data = await api(`/api/models/${modelId}/status`);
       if (data.status === "online") return;
       if (data.status === "offline" && i > 1) {
-        throw new Error("Server process exited unexpectedly after restart. Check CMD for details.");
+        throw new Error("Server process exited during restart — see the error details on the card.");
       }
     }
     throw new Error("Timed out waiting for server to come online after restart (30s).");
@@ -686,7 +789,7 @@ async function startStop(modelId, action) {
       }
       // Process died during startup — stop polling and report
       if (action === "start" && data.status === "offline" && i > 1) {
-        throw new Error("Server process exited unexpectedly. Check the launch command (CMD) for details.");
+        throw new Error("Server process exited during startup — see the error details on the card.");
       }
     }
     // Timed out
@@ -740,6 +843,18 @@ export function setupModels() {
           throw new Error("Missing URL");
         }
         window.open(url, "_blank", "noopener,noreferrer");
+        return;
+      }
+
+      if (action === "logs") {
+        await toggleLogs(modelId);
+        await refreshModels();
+        return;
+      }
+
+      if (action === "dismiss-exit") {
+        dismissedExits.set(modelId, target.dataset.at || "");
+        await refreshModels();
         return;
       }
 

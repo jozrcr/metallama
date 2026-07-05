@@ -15,6 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from .auth import admin_guard, auth_enabled, check_password, create_session, revoke_session
 from .config import STATIC_DIR, Config
 from .hf_routes import router as hf_router
+from .logs import begin_capture, get_last_exit, log_file_path, mark_expected_stop, server_logs
 from .models import ProcessState
 from .ollama.config import load_config as load_ollama_config
 from .ollama.probe import probe_subservers
@@ -323,12 +324,16 @@ async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> d
         try:
             proc = subprocess.Popen(
                 command,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
+                errors="replace",
+                bufsize=1,
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=400, detail=f"Binary not found: {command[0]}") from exc
+
+        begin_capture(model_name, proc)
 
         runtime_processes[model_name] = ProcessState(
             process=proc,
@@ -371,6 +376,7 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
 
         proc = state.process
         if is_alive(proc):
+            mark_expected_stop(model_name)
             proc.terminate()
             for _ in range(20):
                 if not is_alive(proc):
@@ -525,6 +531,34 @@ async def model_slots(model_name: str) -> Any:
     return {"slots": slots}
 
 
+@app.get("/api/models/{model_name}/logs")
+def model_logs(model_name: str, since: int = 0, tail: int = 0) -> dict[str, Any]:
+    """Return captured llama-server output for a managed server.
+
+    - `since=<seq>`: incremental polling — only lines with seq > since.
+    - `tail=<n>`: just the last n lines (overrides since).
+    """
+    if model_name not in MODEL_PROFILES:
+        raise HTTPException(status_code=404, detail="Unknown model")
+
+    log = server_logs.get(model_name)
+    if log is None:
+        lines: list[tuple[int, str]] = []
+    elif tail > 0:
+        lines = log.tail(tail)
+    else:
+        lines = log.since(since)
+
+    state = runtime_processes.get(model_name)
+    return {
+        "lines": [{"seq": s, "text": t} for s, t in lines],
+        "next": lines[-1][0] if lines else since,
+        "running": bool(state and is_alive(state.process)),
+        "last_exit": get_last_exit(model_name),
+        "log_file": str(log_file_path(model_name)),
+    }
+
+
 @app.on_event("startup")
 async def probe_ollama_subservers() -> None:
     await probe_subservers()
@@ -535,6 +569,7 @@ def stop_all_on_shutdown() -> None:
     for model_id, state in list(runtime_processes.items()):
         proc = state.process
         if is_alive(proc):
+            mark_expected_stop(model_id)
             proc.send_signal(signal.SIGTERM)
         runtime_processes.pop(model_id, None)
 

@@ -1,0 +1,58 @@
+# Metallama Unified Configuration
+# =================================
+# This file is the single source of truth for all server configurations.
+#
+# Sections:
+#   engine_defaults  - Default parameters for llama.cpp servers (machine-managed)
+#   managed_servers  - Owned local models (machine-generated, can be regenerated)
+#   remote_servers   - Distant servers (hand-edited by humans)
+#
+# Machine-managed sections may contain auto-generated comments.
+# Remote servers section is safe for manual editing.
+
+# ---------------------------------------------------------------------------
+# Engine Defaults (Machine-Managed)
+# Default CLI args prepended to every server launch for this engine.
+# Last flag wins when merged with per-server args.
+# ---------------------------------------------------------------------------
+engine_defaults:
+  llama:
+    - --gpu-layers all
+    - --flash-attn on
+    - --threads 4
+    - --batch-size 1024
+    - --ubatch-size 512
+    - --split-mode tensor
+    - --device ROCm0,ROCm1
+    - --fit off
+    - --tensor-split 60,40
+    - --ctx-checkpoints 4
+    - --no-mmap
+
+# ---------------------------------------------------------------------------
+# Managed Servers (Machine-Generated)
+# Local models owned by this project. Configuration is generated/managed
+# by the application. Manual edits may be overwritten on regeneration.
+# ---------------------------------------------------------------------------
+managed_servers:
+  - name: "Qwen3.6-27B-Q8_0"
+    model_path: "/home/joz/Documents/AI-Tools/Models/Qwen3.6-27B-Q8_0.gguf"
+    port: 8080
+    context_window: 96000
+    parallel: 1
+    extra_args:
+      - --temp 0.6
+      - --top-k 20
+      - --top-p 0.95
+      - --min-p 0.0
+      - --repeat-penalty 1.0
+      - --presence-penalty 0.0
+      - --spec-type draft-mtp
+      - --spec-draft-n-max 3
+
+# ---------------------------------------------------------------------------
+# Remote Servers (Hand-Edited)
+# Distant servers not owned by this project. Safe for manual editing.
+# These are read-only from the application's perspective.
+# ---------------------------------------------------------------------------
+remote_servers:

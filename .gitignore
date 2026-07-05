@@ -25,3 +25,5 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+# Captured llama-server logs
+logs/
