@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..probe import probe_one, _DEFAULT_CONTEXT_LENGTH
-from ..registry import get_subserver, get_all_subservers
+from ..registry import get_subserver, get_all_subservers, resolve_system_prompt
 from ..schemas import OllamaChatRequest, OllamaGenerateRequest, OllamaShowRequest
 
 router = APIRouter()
@@ -48,7 +48,7 @@ async def list_tags() -> JSONResponse:
                 await probe_one(srv, client)
             arch = srv.upstream_meta.get("general.architecture", srv.family)
             quant = srv.upstream_meta.get("quantization", "unknown")
-            model_name = srv.upstream_model_id or srv.name
+            model_name = srv.name if srv.is_alias else (srv.upstream_model_id or srv.name)
             models.append(
                 {
                     "name": model_name,
@@ -82,7 +82,7 @@ async def list_running() -> JSONResponse:
             try:
                 resp = await client.get(f"{srv.url}/health")
                 if resp.status_code == 200:
-                    model_name = srv.upstream_model_id or srv.name
+                    model_name = srv.name if srv.is_alias else (srv.upstream_model_id or srv.name)
                     running.append(
                         {
                             "name": model_name,
@@ -298,9 +298,20 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
 @router.post("/api/chat", response_model=None)
 async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
     srv = get_subserver(req.model)
+
+    # Build messages list
+    messages: list[dict[str, Any]] = [_ollama_message_to_openai(m) for m in req.messages]
+
+    # System-prompt injection: prepend if no system message and preset has one
+    has_system = any(m.get("role") == "system" for m in messages)
+    if not has_system:
+        system_prompt = resolve_system_prompt(req.model)
+        if system_prompt:
+            messages.insert(0, {"role": "system", "content": system_prompt})
+
     payload: dict[str, Any] = {
         "model": req.model,
-        "messages": [_ollama_message_to_openai(m) for m in req.messages],
+        "messages": messages,
         "stream": req.stream,
         **_translate_options(req.options),
     }

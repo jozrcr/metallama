@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import socket
 import subprocess
 
@@ -10,6 +11,8 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
+
+logger = logging.getLogger(__name__)
 
 from .config import Config
 from .gguf import estimate_vram_gb
@@ -30,22 +33,64 @@ def _get_engine_default_args(engine: str) -> list[str]:
     return config.engine_defaults.get(engine) or []
 
 
+def _get_preset_extra_args(profile: ModelProfile) -> list[str]:
+    """Get extra_args from the preset attached to a server (if any)."""
+    unified = load_unified_config()
+    server_entry = next((s for s in unified.managed_servers if s.name == profile.name), None)
+    if not server_entry or not server_entry.preset:
+        return []
+    preset = _resolve_preset(unified, server_entry.preset)
+    if preset is None:
+        return []
+    return preset.extra_args
+
+
+def _resolve_preset(unified: UnifiedConfig, preset_name: str) -> "Preset | None":
+    """Look up a preset by name (config first, then built-in defaults)."""
+    from .unified_config import find_preset
+    return find_preset(unified, preset_name)
+
+
 def get_profile_with_config(profile: ModelProfile) -> ModelProfile:
     """Get a profile with the latest params from unified config.yaml.
 
     Looks up the managed_server entry by id and applies any overrides
     for context_window, parallel, and model_draft that may have been updated in config.
+
+    If the server has a preset, resolves with precedence:
+    server field > preset field > existing default.
     """
+    from .unified_config import UnifiedConfig
+
     unified = load_unified_config()
     server_entry = next((s for s in unified.managed_servers if s.name == profile.name), None)
     if not server_entry:
         return profile
 
+    # Resolve preset if attached to server
+    preset = None
+    if server_entry.preset:
+        preset = _resolve_preset(unified, server_entry.preset)
+        if preset is None:
+            logger.warning("Server '%s' references unknown preset '%s' — ignoring", server_entry.name, server_entry.preset)
+
     overrides: dict = {}
-    if server_entry.context_window is not None and server_entry.context_window != profile.context_window:
-        overrides["context_window"] = server_entry.context_window
+
+    # context_window: server > preset > default
+    if server_entry.context_window is not None:
+        if server_entry.context_window != profile.context_window:
+            overrides["context_window"] = server_entry.context_window
+    elif preset and preset.context_window is not None:
+        if preset.context_window != profile.context_window:
+            overrides["context_window"] = preset.context_window
+
+    # parallel: server > preset > default
+    # Note: ManagedServer.parallel defaults to 1, indistinguishable from "unset" — acceptable for v1
     if server_entry.parallel != profile.parallel:
         overrides["parallel"] = server_entry.parallel
+    elif preset and preset.parallel is not None and preset.parallel != profile.parallel:
+        overrides["parallel"] = preset.parallel
+
     if server_entry.model_draft != profile.model_draft:
         overrides["model_draft"] = server_entry.model_draft
 
@@ -130,10 +175,14 @@ def build_command_preview(profile: ModelProfile) -> tuple[list[str], bool]:
     profile = get_profile_with_config(profile)
     binary, found = _resolve_binary_or_placeholder(profile)
 
-    # Tokenize: split each arg on whitespace so "--flash-attn on" → ["--flash-attn", "on"]
+    # Tokenize: engine_defaults + preset.extra_args + server.extra_args (later flags win)
     extra_args = [
         token
-        for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
+        for arg in (
+            _get_engine_default_args(profile.engine)
+            + _get_preset_extra_args(profile)
+            + list(profile.extra_args)
+        )
         for token in arg.split()
     ]
 
@@ -174,10 +223,14 @@ def build_command(profile: ModelProfile) -> list[str]:
     profile = get_profile_with_config(profile)
     binary = _resolve_binary(profile)
 
-    # Tokenize: split each arg on whitespace so "--flash-attn on" → ["--flash-attn", "on"]
+    # Tokenize: engine_defaults + preset.extra_args + server.extra_args (later flags win)
     extra_args = [
         token
-        for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
+        for arg in (
+            _get_engine_default_args(profile.engine)
+            + _get_preset_extra_args(profile)
+            + list(profile.extra_args)
+        )
         for token in arg.split()
     ]
 
@@ -344,6 +397,7 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "parallel": profile.parallel,
         "extra_args": profile.extra_args,
         "model_draft": profile.model_draft,
+        "preset": profile.preset,
         "model_found": model_found,
         "managed": True,
         "last_exit": get_unexpected_exit(profile.name) if status == "offline" else None,

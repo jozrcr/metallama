@@ -35,6 +35,24 @@ async function openConnectModal() {
       opt.textContent = m.status === "online" ? `${m.id} (online)` : m.id;
       select.appendChild(opt);
     }
+    // Also add aliases
+    try {
+      const aliasData = await api("/api/aliases");
+      const aliases = aliasData.aliases || [];
+      if (aliases.length > 0) {
+        const group = document.createElement("optgroup");
+        group.label = "Aliases";
+        for (const a of aliases) {
+          const opt = document.createElement("option");
+          opt.value = a.name;
+          opt.textContent = `${a.name} → ${a.server}${a.preset ? ` [${a.preset}]` : ""}`;
+          group.appendChild(opt);
+        }
+        select.appendChild(group);
+      }
+    } catch {
+      // no aliases endpoint or error — ignore
+    }
     const online = models.find((m) => m.status === "online");
     if (online) select.value = online.id;
   } catch {

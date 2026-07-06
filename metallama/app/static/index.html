@@ -67,6 +67,7 @@
                 <button class="chip-btn" type="button" data-status="offline">Offline</button>
               </div>
               <button id="connect-btn" class="btn-secondary" title="Connect editors and agents to your models">🔌 Connect</button>
+              <button id="presets-btn" class="btn-secondary admin-only" title="Manage launch presets">✦ Presets</button>
               <button id="defaults-btn" class="btn-secondary admin-only" title="Edit default engine params">⚙ Defaults</button>
               <button id="add-model-btn" class="btn-primary admin-only" title="Add a new server">+ Add Server</button>
             </div>
@@ -148,6 +149,12 @@
                 <input type="number" id="edit-port" min="1024" max="65535" />
               </div>
               <div class="form-group managed-only">
+                <label for="edit-preset">Preset</label>
+                <select id="edit-preset">
+                  <option value></option>
+                </select>
+              </div>
+              <div class="form-group managed-only">
                 <label for="edit-context-window">Context Window</label>
                 <input type="number" id="edit-context-window" min="1" step="1000" />
               </div>
@@ -168,6 +175,56 @@
           <button class="btn-danger" data-action="modal-delete" id="modal-delete-btn" style="margin-right: auto;">Delete</button>
           <button class="btn-secondary" data-action="modal-cancel">Cancel</button>
           <button class="btn-primary" data-action="modal-save">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Presets Modal -->
+    <div id="presets-modal" class="modal-overlay is-hidden">
+      <div class="modal-dialog" style="max-width: 640px;">
+        <div class="modal-header">
+          <h2>Launch Presets</h2>
+          <button class="modal-close" data-action="presets-close" title="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div id="presets-list" class="presets-list"></div>
+          <hr style="margin: 1.5rem 0; border: none; border-top: 1px solid var(--border);" />
+          <h3 id="preset-form-title">Create Preset</h3>
+          <div class="form-group">
+            <label for="preset-name">Name</label>
+            <input type="text" id="preset-name" placeholder="e.g. agentic-coding" />
+          </div>
+          <div class="form-group">
+            <label for="preset-description">Description</label>
+            <input type="text" id="preset-description" placeholder="Short description" />
+          </div>
+          <div class="modal-columns">
+            <div class="modal-column">
+              <div class="form-group">
+                <label for="preset-context-window">Context Window</label>
+                <input type="number" id="preset-context-window" min="1" step="1000" placeholder="Auto" />
+              </div>
+            </div>
+            <div class="modal-column">
+              <div class="form-group">
+                <label for="preset-parallel">Parallel Slots</label>
+                <input type="number" id="preset-parallel" min="1" placeholder="Auto" />
+              </div>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="preset-extra-args">Extra Args (one per line)</label>
+            <textarea id="preset-extra-args" placeholder="e.g. --mlock"></textarea>
+          </div>
+          <div class="form-group">
+            <label for="preset-system-prompt">System Prompt</label>
+            <textarea id="preset-system-prompt" style="min-height: 100px;"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-danger" data-action="preset-delete" id="preset-delete-btn" style="margin-right: auto; display: none;">Delete</button>
+          <button class="btn-secondary" data-action="preset-cancel">Cancel</button>
+          <button class="btn-primary" data-action="preset-save">Save</button>
         </div>
       </div>
     </div>

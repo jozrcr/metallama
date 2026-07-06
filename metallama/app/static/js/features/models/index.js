@@ -1,6 +1,7 @@
 import { api } from "../../core/api.js";
 import { copyToClipboard } from "../../core/clipboard.js";
 import { setConfigMessage } from "../../core/uiMessage.js";
+import { populatePresetSelect, bindEvents as bindPresetEvents } from "../presets/index.js";
 
 const modelsEl = document.getElementById("models");
 const summaryEl = document.getElementById("summary");
@@ -219,6 +220,11 @@ function openEditModal(modelId, isManaged) {
       document.getElementById("edit-context-window").value = data.context_window || "";
       document.getElementById("edit-parallel").value = data.parallel || "";
       document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
+      // Populate preset select and set value
+      populatePresetSelect().then(() => {
+        const presetSelect = document.getElementById("edit-preset");
+        if (presetSelect && data.preset) presetSelect.value = data.preset;
+      });
       // Populate model selector from available .gguf files
       loadModelFiles().then((mdata) => {
         populateModelSelector(mdata.files || [], data.model_path || "");
@@ -263,6 +269,8 @@ function openCreateModal(type, prefill = null) {
       });
     document.getElementById("edit-context-window").value = 32000;
     document.getElementById("edit-parallel").value = 1;
+    // Populate preset select for create mode
+    populatePresetSelect();
   }
   document.getElementById("edit-modal").classList.remove("is-hidden");
   document.getElementById("modal-delete-btn").classList.add("is-hidden");
@@ -315,8 +323,10 @@ async function saveEditModal() {
         .map((s) => s.trim())
         .filter(Boolean),
     };
+    const presetVal = document.getElementById("edit-preset")?.value;
+    if (presetVal) payload.preset = presetVal;
     Object.keys(payload).forEach((key) => {
-      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft") return;
+      if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "preset") return;
       if (isNaN(payload[key])) delete payload[key];
     });
     if (payload.name === "") delete payload.name;
@@ -378,6 +388,8 @@ async function saveCreateModal() {
         .map((s) => s.trim())
         .filter(Boolean),
     };
+    const presetVal = document.getElementById("edit-preset")?.value;
+    if (presetVal) payload.preset = presetVal;
     if (!payload.model_path) {
       setConfigMessage("Model path is required", true);
       return;
@@ -682,6 +694,9 @@ function cardTemplate(model) {
   const estChip = est
     ? `<span class="info-item vram-est${estWarn ? " warn" : ""}" title="${escapeHtml(estTitle)}">≈${est.total_gb} GB${estWarn ? " ⚠" : ""}</span>`
     : "";
+  const presetChip = model.preset
+    ? `<span class="info-item preset-chip" title="Preset: ${escapeHtml(model.preset)}">✦ ${escapeHtml(model.preset)}</span>`
+    : "";
   const ctxDisplay =
     isLLM
       ? `
@@ -719,6 +734,7 @@ function cardTemplate(model) {
           <div class="info-row">
             ${isManaged && model.pid !== undefined ? `<span class="info-item">PID: ${model.pid ?? "-"}</span>` : ""}
             ${ctxDisplay}
+            ${presetChip}
             ${isManaged ? `<button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-action="cmd" title="Copy launch command">CMD</button>` : ""}
             ${isManaged ? `<button class="btn-secondary btn-small ${openLogs.has(model.id) ? "active" : ""}" data-id="${model.id}" data-action="logs" title="Show server logs">Logs</button>` : ""}
             <button class="btn-secondary btn-small admin-only" data-id="${model.id}" data-managed="${isManaged}" data-action="edit" title="Edit server config">Edit</button>
@@ -745,7 +761,7 @@ function cardTemplate(model) {
       ${isManaged ? `<div class="log-panel ${openLogs.has(model.id) ? "" : "is-hidden"}" data-log-model="${model.id}">
         <div class="log-panel-head">
           <span class="log-panel-title">Server logs</span>
-          <a class="log-open-page" href="/static/logs.html?model=${encodeURIComponent(model.id)}" target="_blank" rel="noopener" title="Open full log view in a new tab">Full view ↗</a>
+          <a class="log-open-page" href="/static/logs.html?model=${encodeURIComponent(model.id)}" target="metallama-logs-${escapeHtml(model.id)}" title="Open full log view (reuses its tab)">Full view ↗</a>
         </div>
         <pre class="log-output"></pre>
       </div>` : ""}
@@ -1087,6 +1103,31 @@ export function setupModels() {
 
     defaultsModal.addEventListener("click", (event) => {
       if (event.target === defaultsModal) closeDefaultsModal();
+    });
+  }
+
+  // Bind preset modal events
+  bindPresetEvents();
+  // Populate preset select on first load
+  populatePresetSelect().catch(() => {});
+
+  // Preset select change handler: prefill context_window and parallel
+  const presetSelect = document.getElementById("edit-preset");
+  if (presetSelect) {
+    presetSelect.addEventListener("change", async () => {
+      const presetName = presetSelect.value;
+      if (!presetName) return;
+      try {
+        const data = await api("/api/presets");
+        const preset = (data.presets || []).find((p) => p.name === presetName);
+        if (!preset) return;
+        const ctxInput = document.getElementById("edit-context-window");
+        const parInput = document.getElementById("edit-parallel");
+        if (preset.context_window && ctxInput.value === "") ctxInput.value = preset.context_window;
+        if (preset.parallel && parInput.value === "") parInput.value = preset.parallel;
+      } catch (e) {
+        // ignore
+      }
     });
   }
 }

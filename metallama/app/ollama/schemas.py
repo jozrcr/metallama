@@ -14,6 +14,8 @@ class SubserverConfig(BaseModel):
     upstream_model_id: Optional[str] = None
     upstream_meta: dict[str, Any] = Field(default_factory=dict)
     reachable: bool = False
+    preset: Optional[str] = None  # preset name attached to this registry entry
+    is_alias: bool = False  # True for alias entries — list under own name, not upstream_model_id
 
 
 class AppConfig(BaseModel):

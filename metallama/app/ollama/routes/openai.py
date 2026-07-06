@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..probe import probe_one, _DEFAULT_CONTEXT_LENGTH
-from ..registry import get_subserver, get_all_subservers
+from ..registry import get_subserver, get_all_subservers, resolve_system_prompt
 
 router = APIRouter()
 
@@ -35,7 +35,7 @@ async def list_models() -> JSONResponse:
             # Server is up but probe may have missed it at startup — re-probe lazily
             if srv.context_length == _DEFAULT_CONTEXT_LENGTH:
                 await probe_one(srv, client)
-            model_name = srv.upstream_model_id or srv.name
+            model_name = srv.name if srv.is_alias else (srv.upstream_model_id or srv.name)
             models.append(
                 {
                     "id": model_name,
@@ -63,6 +63,16 @@ async def chat_completions(request: Request) -> StreamingResponse | JSONResponse
     model = body.get("model", "")
     srv = get_subserver(model)
     stream = body.get("stream", False)
+
+    # System-prompt injection: prepend if no system message and preset has one
+    messages = body.get("messages", [])
+    has_system = isinstance(messages, list) and any(
+        isinstance(m, dict) and m.get("role") == "system" for m in messages
+    )
+    if not has_system:
+        system_prompt = resolve_system_prompt(model)
+        if system_prompt:
+            body["messages"] = [{"role": "system", "content": system_prompt}] + messages
 
     if stream:
         async def generate() -> AsyncIterator[bytes]:
