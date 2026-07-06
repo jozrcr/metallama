@@ -8,6 +8,7 @@ venv/
 .venv/
 env/
 .env/
+.env
 bin/
 lib/
 include/
@@ -27,3 +28,6 @@ coverage.xml
 .pytest_cache/
 # Captured llama-server logs
 logs/
+
+# Machine-local state
+config.yaml
