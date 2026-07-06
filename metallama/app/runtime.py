@@ -102,6 +102,18 @@ def is_alive(proc: subprocess.Popen[str]) -> bool:
     return proc.poll() is None
 
 
+def process_rss_mb(pid: int) -> float | None:
+    """Resident set size of a process in MiB, from /proc (Linux only)."""
+    try:
+        with open(f"/proc/{pid}/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return round(int(line.split()[1]) / 1024, 1)  # kB -> MiB
+    except (OSError, ValueError, IndexError):
+        pass
+    return None
+
+
 def cleanup_dead(model_name: str) -> None:
     state = runtime_processes.get(model_name)
     if state and not is_alive(state.process):
@@ -380,6 +392,25 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
             progress = _load_progress(profile, state)
             load_progress = round(progress, 3) if progress is not None else None
 
+    # RSS from live process
+    rss_mb = None
+    if state and is_alive(state.process):
+        rss_mb = process_rss_mb(state.process.pid)
+
+    # Memory warning from watchdog (Task 3)
+    try:
+        from .watchdog import memory_warnings
+        mem_warn = memory_warnings.get(profile.name)
+    except ImportError:
+        mem_warn = None
+
+    # Speed from log parser (Task 4)
+    try:
+        from .speed import latest_speeds
+        speed = latest_speeds.get(profile.name)
+    except ImportError:
+        speed = None
+
     return {
         "id": profile.name,
         "display_name": profile.name,
@@ -405,4 +436,7 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "last_log": last_log,
         "load_progress": load_progress,
         "vram_estimate": vram_estimate_for(profile) if model_found else None,
+        "rss_mb": rss_mb,
+        "memory_warning": mem_warn,
+        "speed": speed,
     }

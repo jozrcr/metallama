@@ -697,12 +697,35 @@ function cardTemplate(model) {
   const presetChip = model.preset
     ? `<span class="info-item preset-chip" title="Preset: ${escapeHtml(model.preset)}">✦ ${escapeHtml(model.preset)}</span>`
     : "";
+  // RAM chip (Task 2): show RSS when available
+  let ramChip = "";
+  if (typeof model.rss_mb === "number" && model.rss_mb != null) {
+    const rssGb = model.rss_mb / 1024;
+    const ramText = rssGb >= 1 ? `RAM: ${rssGb.toFixed(1)} GB` : `RAM: ${Math.round(model.rss_mb)} MB`;
+    const ramTooltip = model.memory_warning
+      ? escapeHtml(model.memory_warning)
+      : "Host RAM used by this llama-server process (grows with the prompt cache)";
+    const ramWarnClass = model.memory_warning ? " warn" : "";
+    ramChip = `<span class="info-item rss-chip${ramWarnClass}" title="${ramTooltip}">${ramText}</span>`;
+  }
+  // Speed chip (Task 4): show tokens/sec when available
+  let speedChip = "";
+  if (model.speed && model.status === "online" && model.speed.gen_tps != null) {
+    const gen = Math.round(model.speed.gen_tps);
+    const pp = model.speed.pp_tps != null ? Math.round(model.speed.pp_tps) : null;
+    const speedTooltip = pp != null
+      ? `generation: ${gen} t/s · prompt: ${pp} t/s · from last request`
+      : `generation: ${gen} t/s · from last request`;
+    speedChip = `<span class="info-item speed-chip" title="${speedTooltip}">⚡ ${gen} t/s</span>`;
+  }
   const ctxDisplay =
     isLLM
       ? `
     <span class="info-item">CTX: ${ctxKTokens}k</span>
     ${parValue ? `<span class="info-item">PAR: ${parValue}</span>` : ""}
     ${estChip}
+    ${ramChip}
+    ${speedChip}
   `
       : "";
 
