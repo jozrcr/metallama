@@ -335,6 +335,9 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
                 yield (json.dumps({"error": "upstream unreachable"}) + "\n").encode()
             except httpx.TimeoutException:
                 yield (json.dumps({"error": "upstream timeout"}) + "\n").encode()
+            except httpx.HTTPError as exc:
+                # e.g. upstream died mid-stream (RemoteProtocolError)
+                yield (json.dumps({"error": f"upstream connection lost: {exc}"}) + "\n").encode()
 
         return StreamingResponse(generate(), media_type="application/x-ndjson")
 
@@ -410,6 +413,9 @@ async def generate_endpoint(req: OllamaGenerateRequest) -> StreamingResponse | J
                 yield (json.dumps({"error": "upstream unreachable"}) + "\n").encode()
             except httpx.TimeoutException:
                 yield (json.dumps({"error": "upstream timeout"}) + "\n").encode()
+            except httpx.HTTPError as exc:
+                # e.g. upstream died mid-stream (RemoteProtocolError)
+                yield (json.dumps({"error": f"upstream connection lost: {exc}"}) + "\n").encode()
 
         return StreamingResponse(generate(), media_type="application/x-ndjson")
 

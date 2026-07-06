@@ -11,12 +11,25 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(dotenv_path=PROJECT_ROOT / ".env")
 
 
+def _parse_int_env(name: str, default: int) -> int:
+    """Parse an integer from an environment variable, falling back to default."""
+    try:
+        return int(os.getenv(name, str(default)))
+    except (ValueError, TypeError):
+        return default
+
+
 class Config:
     EXECUTABLE_LLAMA = os.getenv("METALLAMA_LLAMACPP_BINARY", "")
     BASE_URL = os.getenv("METALLAMA_BASE_URL", "http://localhost")
     MODELS_DIR = os.getenv("METALLAMA_MODELS_DIR", "")
     # Address llama-server binds to; set 0.0.0.0 to expose on the network.
     BIND_HOST = os.getenv("METALLAMA_BIND_HOST", "127.0.0.1")
+
+    # Watchdog thresholds (Task 3)
+    WATCHDOG = os.getenv("METALLAMA_WATCHDOG", "warn")  # off | warn | recycle
+    RSS_WARN_MB = _parse_int_env("METALLAMA_RSS_WARN_MB", 8192)
+    RSS_LIMIT_MB = _parse_int_env("METALLAMA_RSS_LIMIT_MB", 0)
 
 
 APP_DIR = Path(__file__).resolve().parent

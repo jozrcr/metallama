@@ -85,6 +85,9 @@ async def chat_completions(request: Request) -> StreamingResponse | JSONResponse
                 yield b"data: " + json.dumps({"error": "upstream unreachable"}).encode() + b"\n\n"
             except httpx.TimeoutException:
                 yield b"data: " + json.dumps({"error": "upstream timeout"}).encode() + b"\n\n"
+            except httpx.HTTPError as exc:
+                # e.g. upstream died mid-stream (RemoteProtocolError)
+                yield b"data: " + json.dumps({"error": f"upstream connection lost: {exc}"}).encode() + b"\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
@@ -122,6 +125,9 @@ async def completions(request: Request) -> StreamingResponse | JSONResponse:
                 yield b"data: " + json.dumps({"error": "upstream unreachable"}).encode() + b"\n\n"
             except httpx.TimeoutException:
                 yield b"data: " + json.dumps({"error": "upstream timeout"}).encode() + b"\n\n"
+            except httpx.HTTPError as exc:
+                # e.g. upstream died mid-stream (RemoteProtocolError)
+                yield b"data: " + json.dumps({"error": f"upstream connection lost: {exc}"}).encode() + b"\n\n"
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 

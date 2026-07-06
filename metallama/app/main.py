@@ -407,6 +407,13 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
 
         runtime_processes.pop(model_name, None)
 
+        # Clear cached speeds on stop (Task 4)
+        try:
+            from .speed import clear_speed
+            clear_speed(model_name)
+        except Exception:
+            pass
+
     return {"ok": True, "model": await model_payload(profile)}
 
 
@@ -569,8 +576,11 @@ def model_logs(model_name: str, since: int = 0, tail: int = 0) -> dict[str, Any]
 
 
 @app.on_event("startup")
-async def probe_ollama_subservers() -> None:
+async def on_startup() -> None:
     await probe_subservers()
+    # Start the memory watchdog background loop (Task 3)
+    from .watchdog import watchdog_loop
+    asyncio.create_task(watchdog_loop())
 
 
 @app.on_event("shutdown")

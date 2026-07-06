@@ -79,6 +79,13 @@ python hash_password.py    # prompts for a password, prints the hash
 echo 'METALLAMA_ADMIN_PASS_HASH=scrypt$…' >> .env
 ```
 
+## Tests
+
+```bash
+uv pip install -e ".[dev]"   # installs pytest
+uv run pytest -q              # runs the full suite (~30 tests, <1 s)
+```
+
 ## How It Works
 
 - Each managed server runs as a child process (`llama-server` or compatible binary).
