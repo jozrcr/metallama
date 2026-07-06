@@ -413,7 +413,7 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
 @app.post("/api/models/create")
 async def create_model(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
     from .profiles import reload_model_profiles
-    from .unified_config import add_managed_server
+    from .unified_config import add_managed_server, load_unified_config
 
     model_type = payload.pop("type", "managed")
     if model_type == "managed":
@@ -423,6 +423,12 @@ async def create_model(payload: dict[str, Any] = Body(...), _guard: None = Depen
             raise HTTPException(status_code=400, detail="port is required")
         if not payload.get("model_path"):
             raise HTTPException(status_code=400, detail="model_path is required")
+        # Validate preset if provided
+        preset_val = payload.get("preset")
+        if preset_val is not None:
+            from .unified_config import find_preset
+            if find_preset(load_unified_config(), preset_val) is None:
+                raise HTTPException(status_code=400, detail=f"preset '{preset_val}' not found")
         server = add_managed_server(payload)
         reload_model_profiles()
         rebuild_ollama_registry()
@@ -659,6 +665,21 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
             raise HTTPException(status_code=400, detail="model_draft must be a string")
         updates["model_draft"] = mtp.strip()
 
+    # Validate and collect preset if provided
+    if "preset" in payload:
+        preset_val = payload["preset"]
+        # Normalize empty string to None (clear the preset)
+        if preset_val == "":
+            preset_val = None
+        if preset_val is not None:
+            if not isinstance(preset_val, str):
+                raise HTTPException(status_code=400, detail="preset must be a string or null")
+            # Validate preset exists (config or built-in defaults)
+            from .unified_config import find_preset
+            if find_preset(load_unified_config(), preset_val) is None:
+                raise HTTPException(status_code=400, detail=f"preset '{preset_val}' not found")
+        updates["preset"] = preset_val
+
     if updates:
         # Update config.yaml (machine-managed section)
         update_managed_server(model_name, updates)
@@ -676,6 +697,7 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
             "parallel": server_entry.parallel,
             "port": server_entry.port,
             "extra_args": server_entry.extra_args,
+            "preset": getattr(server_entry, "preset", None),
         } if server_entry else {},
     }
 
@@ -726,6 +748,125 @@ def set_engine_defaults(payload: dict[str, Any] = Body(...), _guard: None = Depe
     update_engine_defaults(engine, args)
     cfg = load_unified_config()
     return {"ok": True, "defaults": cfg.engine_defaults}
+
+
+# ---------------------------------------------------------------------------
+# Presets API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/presets")
+def get_presets() -> dict[str, Any]:
+    from .unified_config import load_unified_config, DEFAULT_PRESETS, Preset
+
+    cfg = load_unified_config()
+    config_preset_names = {p.name for p in cfg.presets}
+    merged: list[Preset] = list(cfg.presets)
+    for dp in DEFAULT_PRESETS:
+        if dp.name not in config_preset_names:
+            merged.append(dp)
+    return {"presets": [p.model_dump() for p in merged]}
+
+
+@app.post("/api/presets")
+def create_or_update_preset(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    from .unified_config import add_preset, load_unified_config
+
+    name = payload.get("name")
+    if not name or not isinstance(name, str):
+        raise HTTPException(status_code=400, detail="name is required and must be a non-empty string")
+
+    # Validate extra_args
+    extra_args = payload.get("extra_args", [])
+    if not isinstance(extra_args, list) or not all(isinstance(a, str) for a in extra_args):
+        raise HTTPException(status_code=400, detail="extra_args must be a list of strings")
+
+    # Validate context_window
+    context_window = payload.get("context_window")
+    if context_window is not None:
+        if not isinstance(context_window, int) or context_window < 1:
+            raise HTTPException(status_code=400, detail="context_window must be a positive integer or null")
+
+    # Validate parallel
+    parallel = payload.get("parallel")
+    if parallel is not None:
+        if not isinstance(parallel, int) or parallel < 1:
+            raise HTTPException(status_code=400, detail="parallel must be a positive integer or null")
+
+    preset = add_preset(payload)
+    rebuild_ollama_registry()
+    return {"ok": True, "preset": preset.model_dump()}
+
+
+@app.delete("/api/presets/{name}")
+def delete_preset_endpoint(name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    from .unified_config import delete_preset, load_unified_config
+
+    try:
+        delete_preset(name)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=409, detail=msg)
+    rebuild_ollama_registry()
+    return {"ok": True, "deleted": name}
+
+
+# ---------------------------------------------------------------------------
+# Aliases API
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/aliases")
+def get_aliases() -> dict[str, Any]:
+    from .unified_config import load_unified_config
+    cfg = load_unified_config()
+    return {"aliases": [a.model_dump() for a in cfg.aliases]}
+
+
+@app.post("/api/aliases")
+def create_or_update_alias(payload: dict[str, Any] = Body(...), _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    from .unified_config import add_alias, load_unified_config
+
+    name = payload.get("name")
+    if not name or not isinstance(name, str):
+        raise HTTPException(status_code=400, detail="name is required and must be a non-empty string")
+
+    server = payload.get("server")
+    if not server or not isinstance(server, str):
+        raise HTTPException(status_code=400, detail="server is required and must be a non-empty string")
+
+    # Validate that server exists (managed or remote)
+    cfg = load_unified_config()
+    server_exists = any(s.name == server for s in cfg.managed_servers) or any(s.name == server for s in cfg.remote_servers)
+    if not server_exists:
+        raise HTTPException(status_code=400, detail=f"server '{server}' not found in managed or remote servers")
+
+    # Validate preset exists if given
+    preset_name = payload.get("preset")
+    if preset_name is not None:
+        from .unified_config import find_preset
+        if find_preset(cfg, preset_name) is None:
+            raise HTTPException(status_code=400, detail=f"preset '{preset_name}' not found")
+
+    alias = add_alias(payload)
+    rebuild_ollama_registry()
+    return {"ok": True, "alias": alias.model_dump()}
+
+
+@app.delete("/api/aliases/{name}")
+def delete_alias_endpoint(name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    from .unified_config import delete_alias
+
+    try:
+        delete_alias(name)
+    except ValueError as exc:
+        if "not found" in str(exc):
+            raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc))
+    rebuild_ollama_registry()
+    return {"ok": True, "deleted": name}
 
 
 

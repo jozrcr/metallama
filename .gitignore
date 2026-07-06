@@ -31,3 +31,4 @@ logs/
 
 # Machine-local state
 config.yaml
+agents/
