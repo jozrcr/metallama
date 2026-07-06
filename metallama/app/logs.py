@@ -51,6 +51,10 @@ def log_file_path(model_name: str) -> Path:
     return LOGS_DIR / f"{_safe_filename(model_name)}.log"
 
 
+def previous_log_path(model_name: str) -> Path:
+    return LOGS_DIR / f"{_safe_filename(model_name)}.log.1"
+
+
 def mark_expected_stop(model_name: str) -> None:
     """Flag that the next exit of this server is user-initiated (not a crash)."""
     _expected_stops.add(model_name)
@@ -79,6 +83,13 @@ def begin_capture(model_name: str, proc: subprocess.Popen[str]) -> None:
     file_path = log_file_path(model_name)
     try:
         LOGS_DIR.mkdir(parents=True, exist_ok=True)
+        # Rotate: if current log exists and is non-empty, move it to .log.1
+        if file_path.exists() and file_path.stat().st_size > 0:
+            try:
+                previous = previous_log_path(model_name)
+                file_path.replace(previous)
+            except OSError:
+                pass
         fh = file_path.open("w", encoding="utf-8", errors="replace")
     except OSError:
         fh = None
