@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -322,34 +321,6 @@ async def _parallel_stream(
         yield {"status": "error", "filename": filename, "error": failed_error}
         return
 
-async def _verify_file_sha256(final_path: Path, filename: str, expected_oid: str | None = None) -> bool:
-    """Verify downloaded file integrity by computing SHA-256.
-    
-    For local-only threat model, this provides tamper detection.
-    Returns True if verification passes or no expected hash provided.
-    """
-    if not expected_oid:
-        return True
-    try:
-        sha256 = hashlib.sha256()
-        with open(final_path, "rb") as f:
-            for chunk in iter(lambda: f.read(8192 * 1024), b""):
-                sha256.update(chunk)
-        computed = sha256.hexdigest()
-        # HF uses git blob SHA (oid) which differs from content SHA-256
-        # Log the computed hash for manual verification if needed
-        logger.info("Downloaded %s: sha256=%s (oid=%s)", filename, computed, expected_oid)
-        return True
-    except OSError as exc:
-        logger.warning("Failed to verify %s: %s", filename, exc)
-        return True  # Don't fail on verification error for local-only
-
-
-async def _verify_single_file(final_path: Path, filename: str, oid: str | None = None) -> None:
-    """Verify a single downloaded file."""
-    await _verify_file_sha256(final_path, filename, oid)
-
-
 async def download_model(
     repo_id: str,
     filenames: list[str],
@@ -396,14 +367,9 @@ async def download_model(
                     stream = _single_stream(client, url, filename, partial_path, final_path)
 
                 had_error = False
-                file_done = False
                 async for msg in stream:
                     if msg.get("status") == "error":
                         had_error = True
-                    if msg.get("status") == "done":
-                        file_done = True
-                        # Verify downloaded file integrity
-                        await _verify_single_file(final_path, filename)
                     yield msg
                 if had_error:
                     return

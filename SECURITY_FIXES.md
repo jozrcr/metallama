@@ -16,6 +16,8 @@ Eight issues were identified and fixed across the codebase, ranging from critica
 
 **Fix:** Replaced with `os.path.commonpath()` comparison for robust path validation.
 
+**Review correction:** the original patch referenced `os` without importing it, so every call crashed with `NameError` (HTTP 500). `import os` added in the follow-up commit.
+
 ---
 
 ## 2. Command Injection via Config Args (Critical)
@@ -24,7 +26,7 @@ Eight issues were identified and fixed across the codebase, ranging from critica
 
 **Issue:** User-provided `extra_args` in config.yaml were passed directly to `llama-server` without filtering, allowing dangerous flags like `--host 0.0.0.0` to expose the server network-wide.
 
-**Fix:** Added `_sanitize_args()` function that strips dangerous flags (`--host`, `--log-file`, `--save-loadstate`, `--control-vector`, `--in-prefix`) and their values from the argument list. Applied to both `build_command()` and `build_command_preview()`.
+**Fix (revised in review):** the original `_sanitize_args()` approach was inverted — the base command hardcoded `--host 0.0.0.0`, and stripping `--host` from extra args removed the only way to *restrict* binding while keeping the network-wide default. Replaced with the actual fix: llama-server now binds `METALLAMA_BIND_HOST` (default `127.0.0.1`, localhost-only); set it to `0.0.0.0` explicitly to expose servers on the network. Config args are trusted (single-admin tool) and are no longer filtered — an explicit `--host` in extra args still wins, as an intentional override.
 
 ---
 
@@ -58,7 +60,7 @@ Eight issues were identified and fixed across the codebase, ranging from critica
 
 **Issue:** Downloaded GGUF files from HuggingFace were not verified after download, providing no tamper detection.
 
-**Fix:** Added `_verify_file_sha256()` function that computes SHA-256 hash after download completes and logs it. The `oid` (git blob SHA) from the HF API is now included in file metadata for reference.
+**Fix (removed in review):** the added `_verify_file_sha256()` was dead code — it was only ever invoked without an expected hash (returning `True` immediately), compared nothing when it did run, and would have blocked the event loop hashing multi-GB files synchronously. Removed. Real verification would compare against the HF LFS `sha256` oid in a worker thread — tracked as future work.
 
 ---
 

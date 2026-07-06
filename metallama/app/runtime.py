@@ -24,38 +24,6 @@ runtime_processes: dict[str, ProcessState] = {}
 model_locks: dict[str, asyncio.Lock] = {key: asyncio.Lock() for key in MODEL_PROFILES}
 
 
-# Dangerous flags that could expose the server or cause file access issues
-_DANGEROUS_FLAGS = frozenset({
-    "--host",           # Could bind to 0.0.0.0
-    "--log-file",       # Could write to arbitrary paths
-    "--save-loadstate", # Could write to arbitrary paths
-    "--control-vector", # Could load arbitrary files
-    "--in-prefix",      # Unnecessary attack surface
-})
-
-
-def _sanitize_args(args: list[str]) -> list[str]:
-    """Remove dangerous flags that could be injected via config.
-
-    Returns a filtered list with dangerous flags and their values stripped.
-    """
-    result: list[str] = []
-    skip_next = False
-    for i, arg in enumerate(args):
-        if skip_next:
-            skip_next = False
-            continue
-        # Check for --flag value and --flag=value forms
-        flag = arg.split("=")[0] if "=" in arg else arg
-        if flag in _DANGEROUS_FLAGS:
-            # For --flag value form, skip the next arg too
-            if "=" not in arg:
-                skip_next = True
-            continue
-        result.append(arg)
-    return result
-
-
 def _get_engine_default_args(engine: str) -> list[str]:
     """Get default CLI args for an engine from unified config."""
     config = load_unified_config()
@@ -168,7 +136,6 @@ def build_command_preview(profile: ModelProfile) -> tuple[list[str], bool]:
         for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
         for token in arg.split()
     ]
-    extra_args = _sanitize_args(extra_args)
 
     if profile.engine == "llama" and profile.context_window is not None:
         extra_args = _strip_flag(extra_args, "--ctx-size")
@@ -179,7 +146,7 @@ def build_command_preview(profile: ModelProfile) -> tuple[list[str], bool]:
         extra_args = _strip_flag(extra_args, "--parallel")
         extra_args += ["--parallel", str(profile.parallel)]
 
-    cmd = [binary, "--model", str(profile.model_path), "--host", "0.0.0.0", "--port", str(profile.port)]
+    cmd = [binary, "--model", str(profile.model_path), "--host", Config.BIND_HOST, "--port", str(profile.port)]
     if profile.model_draft:
         cmd += ["--model-draft", str(profile.model_draft)]
     cmd += extra_args
@@ -213,7 +180,6 @@ def build_command(profile: ModelProfile) -> list[str]:
         for arg in _get_engine_default_args(profile.engine) + list(profile.extra_args)
         for token in arg.split()
     ]
-    extra_args = _sanitize_args(extra_args)
 
     if profile.engine == "llama" and profile.context_window is not None:
         extra_args = _strip_flag(extra_args, "--ctx-size")
@@ -229,7 +195,7 @@ def build_command(profile: ModelProfile) -> list[str]:
     if not model_path.exists():
         raise HTTPException(status_code=400, detail=f"Model file not found: {profile.model_path}")
 
-    cmd = [binary, "--model", str(model_path), "--host", "0.0.0.0", "--port", str(profile.port)]
+    cmd = [binary, "--model", str(model_path), "--host", Config.BIND_HOST, "--port", str(profile.port)]
     if profile.model_draft:
         cmd += ["--model-draft", str(profile.model_draft)]
     cmd += extra_args
