@@ -200,6 +200,51 @@ def stats_overview(model: str | None = None, hours: float = 24) -> dict[str, Any
         raise HTTPException(status_code=500, detail=f"stats unavailable: {exc}")
 
 
+@app.get("/api/stats/export")
+def stats_export(model: str | None = None, hours: float = 24):
+    """Export request stats as CSV — one row per request, no row limit."""
+    import csv
+    import io
+    from datetime import datetime, timezone
+
+    from fastapi.responses import Response
+
+    from .stats import _get_conn, _lock
+
+    since_ms = int((time.time() - hours * 3600) * 1000)
+    where = "ts >= ?"
+    args: list[Any] = [since_ms]
+    if model:
+        where += " AND model = ?"
+        args.append(model)
+
+    try:
+        with _lock:
+            rows = _get_conn().execute(
+                f"""SELECT ts, model, prompt_tokens, completion_tokens,
+                           duration_ms, pp_tps, gen_tps, stream
+                    FROM requests WHERE {where}
+                    ORDER BY ts""",
+                args,
+            ).fetchall()
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow(["ts_iso", "model", "prompt_tokens", "completion_tokens",
+                         "duration_ms", "pp_tps", "gen_tps", "stream"])
+        for row in rows:
+            ts_iso = datetime.fromtimestamp(row[0] / 1000, tz=timezone.utc).isoformat()
+            writer.writerow([ts_iso] + list(row[1:]))
+        buf.seek(0)
+        return Response(
+            content=buf.getvalue(),
+            media_type="text/csv",
+            headers={"Content-Disposition": "attachment; filename=metallama-stats.csv"},
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"export failed: {exc}")
+
+
 @app.get("/api/library")
 def model_library() -> dict[str, Any]:
     """Inventory of the models directory: downloaded GGUFs (with GGUF metadata
