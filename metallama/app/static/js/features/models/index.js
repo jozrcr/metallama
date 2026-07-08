@@ -217,13 +217,14 @@ function openEditModal(modelId, isManaged) {
     if (isManaged) {
       document.getElementById("edit-model-path").value = data.model_path || "";
       document.getElementById("edit-port").value = data.port || "";
-      document.getElementById("edit-context-window").value = data.context_window || "";
+      document.getElementById("edit-context-window").value = data.config_context_window ?? "";
       document.getElementById("edit-parallel").value = data.parallel || "";
       document.getElementById("edit-extra-args").value = (data.extra_args || []).join("\n");
       // Populate preset select and set value
       populatePresetSelect().then(() => {
         const presetSelect = document.getElementById("edit-preset");
         if (presetSelect && data.preset) presetSelect.value = data.preset;
+        updateCtxPlaceholder();
       });
       // Populate model selector from available .gguf files
       loadModelFiles().then((mdata) => {
@@ -271,9 +272,30 @@ function openCreateModal(type, prefill = null) {
     document.getElementById("edit-parallel").value = 1;
     // Populate preset select for create mode
     populatePresetSelect();
+    updateCtxPlaceholder();
   }
   document.getElementById("edit-modal").classList.remove("is-hidden");
   document.getElementById("modal-delete-btn").classList.add("is-hidden");
+}
+
+
+async function updateCtxPlaceholder() {
+  const ctxInput = document.getElementById("edit-context-window");
+  const presetName = document.getElementById("edit-preset")?.value;
+  if (!ctxInput) return;
+  if (!presetName) {
+    ctxInput.placeholder = "";
+    return;
+  }
+  try {
+    const data = await api("/api/presets");
+    const p = (data.presets || []).find((x) => x.name === presetName);
+    ctxInput.placeholder = p?.context_window
+      ? `empty = from preset (${p.context_window})`
+      : "";
+  } catch {
+    ctxInput.placeholder = "";
+  }
 }
 
 // Open the create modal pre-filled for a freshly downloaded model file.
@@ -325,6 +347,10 @@ async function saveEditModal() {
     };
     const presetVal = document.getElementById("edit-preset")?.value;
     if (presetVal) payload.preset = presetVal;
+    // Empty ctx field = clear the override (preset/default takes effect)
+    if (document.getElementById("edit-context-window").value.trim() === "") {
+      payload.context_window = null;
+    }
     Object.keys(payload).forEach((key) => {
       if (key === "extra_args" || key === "name" || key === "model_path" || key === "model_draft" || key === "preset") return;
       if (isNaN(payload[key])) delete payload[key];
@@ -1065,6 +1091,12 @@ export function setupModels() {
     });
   }
 
+  // ── Preset select: reflect preset ctx as field placeholder ──
+  const presetSelect = document.getElementById("edit-preset");
+  if (presetSelect) {
+    presetSelect.addEventListener("change", () => updateCtxPlaceholder());
+  }
+
   // ── Stem button in edit modal ─────────────────────────
   const stemBtn = document.getElementById("edit-stem-btn");
   if (stemBtn) {
@@ -1135,7 +1167,6 @@ export function setupModels() {
   populatePresetSelect().catch(() => {});
 
   // Preset select change handler: prefill context_window and parallel
-  const presetSelect = document.getElementById("edit-preset");
   if (presetSelect) {
     presetSelect.addEventListener("change", async () => {
       const presetName = presetSelect.value;

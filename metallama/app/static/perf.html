@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Performance — Metallama</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="perf-page">
+    <header class="logs-page-head">
+      <div class="logs-page-head-left">
+        <a class="logs-back" href="/" title="Back to Metallama">← Metallama</a>
+        <h1 class="logs-page-title">Performance</h1>
+        <select id="perf-model" class="server-filter" style="width:auto;min-width:180px;"></select>
+      </div>
+      <div class="logs-page-head-right">
+        <div class="status-filter" role="group" aria-label="Time range">
+          <button class="chip-btn" type="button" data-hours="1">1h</button>
+          <button class="chip-btn" type="button" data-hours="6">6h</button>
+          <button class="chip-btn active" type="button" data-hours="24">24h</button>
+          <button class="chip-btn" type="button" data-hours="168">7d</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="perf-main">
+      <div class="perf-tiles">
+        <div class="side-panel perf-tile"><span class="perf-tile-num" id="tile-requests">–</span><span class="perf-tile-label">Requests</span></div>
+        <div class="side-panel perf-tile"><span class="perf-tile-num" id="tile-tokens">–</span><span class="perf-tile-label">Tokens generated</span></div>
+        <div class="side-panel perf-tile"><span class="perf-tile-num" id="tile-gen">–</span><span class="perf-tile-label">Avg gen tok/s</span></div>
+        <div class="side-panel perf-tile"><span class="perf-tile-num" id="tile-pp">–</span><span class="perf-tile-label">Avg prompt tok/s</span></div>
+      </div>
+
+      <section class="side-panel perf-graph-panel">
+        <div class="perf-graph-head">
+          <h2 class="side-title">Generation speed</h2>
+          <span class="perf-legend"><i class="perf-swatch" style="background:var(--blue)"></i> gen tok/s
+            <i class="perf-swatch" style="background:var(--accent-2)"></i> prompt tok/s ÷ 10</span>
+        </div>
+        <canvas id="graph-speed" class="perf-canvas" width="1100" height="180"></canvas>
+        <p id="speed-empty" class="library-empty is-hidden">No data yet — send some requests through the gateway.</p>
+      </section>
+
+      <section class="side-panel perf-graph-panel" id="rss-panel">
+        <div class="perf-graph-head">
+          <h2 class="side-title">Server RAM (RSS)</h2>
+          <span class="perf-legend"><i class="perf-swatch" style="background:var(--accent)"></i> RSS
+            <i class="perf-swatch" style="background:var(--accent-2)"></i> recycle
+            <i class="perf-swatch" style="background:var(--red)"></i> crash-restart</span>
+        </div>
+        <canvas id="graph-rss" class="perf-canvas" width="1100" height="180"></canvas>
+        <p id="rss-empty" class="library-empty is-hidden">No samples yet for this server.</p>
+      </section>
+    </main>
+
+    <script type="module">
+      const theme = localStorage.getItem("metallama.theme");
+      const resolved = theme === "system" || !theme
+        ? (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+        : theme;
+      document.documentElement.dataset.theme = resolved;
+
+      const modelSel = document.getElementById("perf-model");
+      let hours = 24;
+
+      function cssVar(name) {
+        return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+      }
+
+      async function loadModels() {
+        try {
+          const r = await fetch("/api/models");
+          const data = await r.json();
+          modelSel.innerHTML = '<option value="">All models</option>';
+          for (const m of data.models || []) {
+            const opt = document.createElement("option");
+            opt.value = m.id;
+            opt.textContent = m.id;
+            modelSel.appendChild(opt);
+          }
+          const q = new URLSearchParams(location.search).get("model");
+          if (q) modelSel.value = q;
+        } catch { /* keep empty */ }
+      }
+
+      function fmtNum(n) {
+        if (n == null) return "–";
+        if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
+        if (n >= 10_000) return (n / 1000).toFixed(1) + "K";
+        return String(n);
+      }
+
+      function drawAxes(ctx, w, h) {
+        ctx.strokeStyle = resolved === "dark" ? "rgba(255,255,255,0.1)" : "rgba(0,0,0,0.1)";
+        ctx.lineWidth = 1;
+        [0.25, 0.5, 0.75].forEach((p) => {
+          ctx.beginPath(); ctx.moveTo(0, h * p); ctx.lineTo(w, h * p); ctx.stroke();
+        });
+      }
+
+      function timeToX(ts, t0, t1, w) {
+        return t1 === t0 ? w : ((ts - t0) / (t1 - t0)) * (w - 10) + 5;
+      }
+
+      function drawSpeed(series) {
+        const canvas = document.getElementById("graph-speed");
+        const ctx = canvas.getContext("2d");
+        const { width: w, height: h } = canvas;
+        ctx.clearRect(0, 0, w, h);
+        document.getElementById("speed-empty").classList.toggle("is-hidden", series.length > 0);
+        if (!series.length) return;
+        drawAxes(ctx, w, h);
+        const t1 = Date.now();
+        const t0 = t1 - hours * 3600 * 1000;
+        const gens = series.map((r) => r[1]).filter((v) => v != null);
+        const pps = series.map((r) => r[2] != null ? r[2] / 10 : null).filter((v) => v != null);
+        const maxY = Math.max(10, ...gens, ...pps) * 1.15;
+        for (const [ts, gen, pp] of series) {
+          const x = timeToX(ts, t0, t1, w);
+          if (gen != null) {                      // impulse bar per request
+            const y = h - (gen / maxY) * (h - 8) - 4;
+            ctx.strokeStyle = cssVar("--blue"); ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(x, h - 4); ctx.lineTo(x, y); ctx.stroke();
+          }
+          if (pp != null) {                       // prompt speed ÷10 as dots
+            const y = h - ((pp / 10) / maxY) * (h - 8) - 4;
+            ctx.fillStyle = cssVar("--accent-2");
+            ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+        ctx.fillStyle = cssVar("--muted");
+        ctx.font = "11px ui-monospace, monospace";
+        ctx.fillText(`max ${Math.round(maxY)} t/s`, 6, 12);
+      }
+
+      function drawRss(samples, events) {
+        const panel = document.getElementById("rss-panel");
+        panel.classList.toggle("is-hidden", !modelSel.value);
+        if (!modelSel.value) return;
+        const canvas = document.getElementById("graph-rss");
+        const ctx = canvas.getContext("2d");
+        const { width: w, height: h } = canvas;
+        ctx.clearRect(0, 0, w, h);
+        document.getElementById("rss-empty").classList.toggle("is-hidden", samples.length > 0);
+        if (!samples.length) return;
+        drawAxes(ctx, w, h);
+        const t1 = Date.now();
+        const t0 = t1 - hours * 3600 * 1000;
+        const maxY = Math.max(...samples.map((s) => s[1])) * 1.2;
+        // event markers first (behind the line)
+        for (const [ts, kind] of events) {
+          const x = timeToX(ts, t0, t1, w);
+          ctx.strokeStyle = kind === "recycle" ? cssVar("--accent-2")
+            : kind === "crash_restart" ? cssVar("--red")
+            : resolved === "dark" ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.25)";
+          ctx.lineWidth = kind === "start" || kind === "stop" ? 1 : 2;
+          ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        }
+        ctx.strokeStyle = cssVar("--accent"); ctx.lineWidth = 2;
+        ctx.beginPath();
+        samples.forEach(([ts, mb], i) => {
+          const x = timeToX(ts, t0, t1, w);
+          const y = h - (mb / maxY) * (h - 8) - 4;
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.fillStyle = cssVar("--muted");
+        ctx.font = "11px ui-monospace, monospace";
+        ctx.fillText(`max ${(maxY / 1024).toFixed(1)} GB`, 6, 12);
+      }
+
+      async function refresh() {
+        const params = new URLSearchParams({ hours: String(hours) });
+        if (modelSel.value) params.set("model", modelSel.value);
+        try {
+          const r = await fetch(`/api/stats/overview?${params}`);
+          if (!r.ok) throw new Error();
+          const d = await r.json();
+          document.getElementById("tile-requests").textContent = fmtNum(d.requests);
+          document.getElementById("tile-tokens").textContent = fmtNum(d.completion_tokens);
+          document.getElementById("tile-gen").textContent = d.avg_gen_tps != null ? d.avg_gen_tps : "–";
+          document.getElementById("tile-pp").textContent = d.avg_pp_tps != null ? d.avg_pp_tps : "–";
+          drawSpeed(d.series.requests || []);
+          drawRss(d.series.rss || [], d.series.events || []);
+        } catch { /* transient — keep last render */ }
+      }
+
+      modelSel.addEventListener("change", refresh);
+      document.querySelectorAll(".chip-btn[data-hours]").forEach((chip) => {
+        chip.addEventListener("click", () => {
+          hours = Number(chip.dataset.hours);
+          document.querySelectorAll(".chip-btn[data-hours]").forEach((c) =>
+            c.classList.toggle("active", c === chip));
+          refresh();
+        });
+      });
+
+      loadModels().then(refresh);
+      setInterval(refresh, 30000);
+    </script>
+  </body>
+</html>

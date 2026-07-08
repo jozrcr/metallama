@@ -90,7 +90,9 @@ def begin_capture(model_name: str, proc: subprocess.Popen[str]) -> None:
     log = ServerLog()
     server_logs[model_name] = log
     _last_exit.pop(model_name, None)
-    _expected_stops.discard(model_name)
+    # NOTE: _expected_stops is deliberately NOT cleared here — a recycle's
+    # new start can race the old process's reader thread, which must still
+    # see the flag to record the exit as expected (fixes false crash banner).
 
     file_path = log_file_path(model_name)
     try:

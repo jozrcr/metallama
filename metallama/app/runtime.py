@@ -374,6 +374,13 @@ def _load_progress(profile: ModelProfile, state: ProcessState) -> float | None:
         return None
 
 
+def _raw_context_window(name: str, fallback: int | None) -> int | None:
+    """The server's OWN context_window from config (None = inherited from
+    preset/default) — the edit modal must show this, not the merged value."""
+    entry = next((s for s in load_unified_config().managed_servers if s.name == name), None)
+    return entry.context_window if entry else fallback
+
+
 async def model_payload(profile: ModelProfile) -> dict[str, Any]:
     # Get the profile with latest context_window from config
     profile = get_profile_with_config(profile)
@@ -431,6 +438,7 @@ async def model_payload(profile: ModelProfile) -> dict[str, Any]:
         "preset": profile.preset,
         "model_found": model_found,
         "managed": True,
+        "config_context_window": _raw_context_window(profile.name, profile.context_window),
         "last_exit": get_unexpected_exit(profile.name) if status == "offline" else None,
         "started_at": state.started_at if state else None,
         "last_log": last_log,

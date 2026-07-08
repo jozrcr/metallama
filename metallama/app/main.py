@@ -189,6 +189,17 @@ def suggest_port() -> dict[str, Any]:
     return {"port": port}
 
 
+@app.get("/api/stats/overview")
+def stats_overview(model: str | None = None, hours: float = 24) -> dict[str, Any]:
+    """Aggregated request/RSS/event stats for the performance page."""
+    from .stats import overview
+    since_ms = int((time.time() - hours * 3600) * 1000)
+    try:
+        return overview(model, since_ms)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"stats unavailable: {exc}")
+
+
 @app.get("/api/library")
 def model_library() -> dict[str, Any]:
     """Inventory of the models directory: downloaded GGUFs (with GGUF metadata
@@ -339,8 +350,8 @@ async def list_models() -> dict[str, Any]:
     return {"models": managed + remote}
 
 
-@app.post("/api/models/{model_name}/start")
-async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+async def _start_model_core(model_name: str) -> dict[str, Any]:
+    """Core model-start logic (no auth, no streak reset)."""
     profile = MODEL_PROFILES.get(model_name)
     if not profile:
         raise HTTPException(status_code=404, detail="Unknown model")
@@ -379,7 +390,20 @@ async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> d
             command=command,
         )
 
+    from .stats import record_event
+    record_event(model_name, "start", "")
     return {"ok": True, "model": await model_payload(profile)}
+
+
+@app.post("/api/models/{model_name}/start")
+async def start_model(model_name: str, _guard: None = Depends(admin_guard)) -> dict[str, Any]:
+    # User-initiated start resets crash streak (Task 6)
+    try:
+        from .watchdog import _reset_streak
+        _reset_streak(model_name)
+    except Exception:
+        pass
+    return await _start_model_core(model_name)
 
 
 @app.post("/api/models/{model_name}/stop")
@@ -398,7 +422,8 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
         if is_alive(proc):
             mark_expected_stop(model_name)
             proc.terminate()
-            for _ in range(20):
+            # Big models need time to free buffers; SIGKILL only as last resort
+            for _ in range(120):
                 if not is_alive(proc):
                     break
                 await asyncio.sleep(0.25)
@@ -414,6 +439,8 @@ async def stop_model(model_name: str, _guard: None = Depends(admin_guard)) -> di
         except Exception:
             pass
 
+    from .stats import record_event
+    record_event(model_name, "stop", "")
     return {"ok": True, "model": await model_payload(profile)}
 
 
@@ -447,6 +474,7 @@ async def create_model(payload: dict[str, Any] = Body(...), _guard: None = Depen
             raise HTTPException(status_code=400, detail="url is required")
         from .unified_config import add_remote_server
         add_remote_server(payload)
+        rebuild_ollama_registry()
         return {"ok": True, "name": payload["name"]}
     else:
         raise HTTPException(status_code=400, detail="type must be 'managed' or 'remote'")
@@ -473,6 +501,7 @@ async def delete_model(model_name: str, _guard: None = Depends(admin_guard)) -> 
     cfg = load_unified_config()
     if any(s.name == model_name for s in cfg.remote_servers):
         delete_remote_server(model_name)
+        rebuild_ollama_registry()
         return {"ok": True, "deleted": model_name}
 
     raise HTTPException(status_code=404, detail="Unknown model")
@@ -640,12 +669,16 @@ async def update_model_config(model_name: str, payload: dict[str, Any] = Body(..
             raise HTTPException(status_code=400, detail="model_path must be a string")
         updates["model_path"] = mp.strip()
 
-    # Validate and collect context_window if provided
+    # Validate and collect context_window if provided (null clears the
+    # server override so a preset's context_window can take effect)
     if "context_window" in payload:
         context_window = payload["context_window"]
-        if not isinstance(context_window, int) or context_window < 1:
-            raise HTTPException(status_code=400, detail="context_window must be a positive integer")
-        updates["context_window"] = context_window
+        if context_window is None:
+            updates["context_window"] = None
+        elif not isinstance(context_window, int) or context_window < 1:
+            raise HTTPException(status_code=400, detail="context_window must be a positive integer or null")
+        else:
+            updates["context_window"] = context_window
 
     # Validate and collect parallel if provided
     if "parallel" in payload:

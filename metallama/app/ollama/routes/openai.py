@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, AsyncIterator
 
 import httpx
@@ -9,8 +10,27 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ..probe import probe_one, _DEFAULT_CONTEXT_LENGTH
 from ..registry import get_subserver, get_all_subservers, resolve_system_prompt
+from ...stats import record_request
 
 router = APIRouter()
+
+
+def _scan_sse_tail(tail: str) -> tuple[dict | None, dict | None]:
+    """Best-effort extraction of usage/timings from the last SSE lines."""
+    usage = timings = None
+    for line in tail.splitlines():
+        if not line.startswith("data:"):
+            continue
+        payload = line[len("data:"):].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            continue
+        usage = data.get("usage") or usage
+        timings = data.get("timings") or timings
+    return usage, timings
 
 _TIMEOUT = httpx.Timeout(connect=5.0, read=600.0, write=30.0, pool=5.0)
 _HEALTH_TIMEOUT = httpx.Timeout(1.0)
@@ -76,11 +96,17 @@ async def chat_completions(request: Request) -> StreamingResponse | JSONResponse
 
     if stream:
         async def generate() -> AsyncIterator[bytes]:
+            t0 = time.monotonic()
+            tail = ""
             try:
                 async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                     async with client.stream("POST", f"{srv.url}/v1/chat/completions", json=body) as resp:
                         async for chunk in resp.aiter_bytes():
+                            tail = (tail + chunk.decode("utf-8", errors="replace"))[-8192:]
                             yield chunk
+                usage, timings = _scan_sse_tail(tail)
+                record_request(model, usage, timings,
+                               int((time.monotonic() - t0) * 1000), stream=True)
             except httpx.ConnectError:
                 yield b"data: " + json.dumps({"error": "upstream unreachable"}).encode() + b"\n\n"
             except httpx.TimeoutException:
@@ -91,6 +117,7 @@ async def chat_completions(request: Request) -> StreamingResponse | JSONResponse
 
         return StreamingResponse(generate(), media_type="text/event-stream")
 
+    t0 = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(f"{srv.url}/v1/chat/completions", json=body)
@@ -99,7 +126,11 @@ async def chat_completions(request: Request) -> StreamingResponse | JSONResponse
     except httpx.TimeoutException:
         raise HTTPException(status_code=502, detail={"error": "upstream timeout"})
 
-    return JSONResponse(content=resp.json(), status_code=resp.status_code)
+    data = resp.json()
+    if resp.status_code == 200:
+        record_request(model, data.get("usage"), data.get("timings"),
+                       int((time.monotonic() - t0) * 1000), stream=False)
+    return JSONResponse(content=data, status_code=resp.status_code)
 
 
 # ---------------------------------------------------------------------------
