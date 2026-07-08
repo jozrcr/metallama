@@ -1970,3 +1970,82 @@ body.admin-locked .disabled-readonly {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ── Performance page ──────────────────────────────────── */
+.perf-link > a {
+  text-decoration: none;
+  color: white;
+}
+
+.perf-main {
+  max-width: 1200px;
+  margin: 1.5rem auto 3rem;
+  padding: 0 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.perf-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 1rem;
+}
+
+.perf-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.perf-tile-num {
+  font-size: 1.7rem;
+  font-weight: 750;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.perf-tile-label {
+  font-size: 0.76rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+
+.perf-graph-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.6rem;
+}
+
+.perf-graph-head .side-title {
+  margin: 0;
+}
+
+.perf-legend {
+  font-size: 0.74rem;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.perf-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  margin-left: 0.6rem;
+}
+
+.perf-canvas {
+  display: block;
+  width: 100%;
+  height: 180px;
+  border: var(--border-size) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}

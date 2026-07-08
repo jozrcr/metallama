@@ -31,6 +31,9 @@ class Config:
     RSS_WARN_MB = _parse_int_env("METALLAMA_RSS_WARN_MB", 8192)
     RSS_LIMIT_MB = _parse_int_env("METALLAMA_RSS_LIMIT_MB", 0)
 
+    # Crash auto-restart (Task 6)
+    CRASH_RESTART = _parse_int_env("METALLAMA_CRASH_RESTART", 0)
+
 
 APP_DIR = Path(__file__).resolve().parent
 STATIC_DIR = APP_DIR / "static"

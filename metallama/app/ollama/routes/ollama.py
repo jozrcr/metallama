@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time as _time
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator
 
@@ -12,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from ..probe import probe_one, _DEFAULT_CONTEXT_LENGTH
 from ..registry import get_subserver, get_all_subservers, resolve_system_prompt
 from ..schemas import OllamaChatRequest, OllamaGenerateRequest, OllamaShowRequest
+from ...stats import record_request
 
 router = APIRouter()
 
@@ -248,8 +250,13 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
     """
     pending_calls: dict[int, dict[str, Any]] = {}
     finish: str | None = None
+    t0 = _time.monotonic()
+    usage: dict[str, Any] | None = None
+    timings: dict[str, Any] | None = None
 
     async for data in _sse_events(resp):
+        usage = data.get("usage") or usage
+        timings = data.get("timings") or timings
         choice = data.get("choices", [{}])[0] if data.get("choices") else {}
         finish = choice.get("finish_reason") or finish
         delta = choice.get("delta", {})
@@ -286,6 +293,7 @@ async def _stream_chat(model: str, resp: httpx.Response) -> AsyncIterator[str]:
             "done": False,
         }) + "\n"
 
+    record_request(model, usage, timings, int((_time.monotonic() - t0) * 1000), stream=True)
     yield json.dumps({
         "model": model,
         "created_at": _now(),
@@ -341,6 +349,7 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
 
         return StreamingResponse(generate(), media_type="application/x-ndjson")
 
+    t0 = _time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             resp = await client.post(f"{srv.url}/v1/chat/completions", json=payload)
@@ -353,6 +362,8 @@ async def chat(req: OllamaChatRequest) -> StreamingResponse | JSONResponse:
         raise HTTPException(status_code=502, detail={"error": f"upstream error: {resp.text[:300]}"})
 
     data = resp.json()
+    record_request(req.model, data.get("usage"), data.get("timings"),
+                   int((_time.monotonic() - t0) * 1000), stream=False)
     choice = data.get("choices", [{}])[0]
     message = choice.get("message", {})
     out_message: dict[str, Any] = {"role": "assistant", "content": message.get("content") or ""}

@@ -32,3 +32,5 @@ logs/
 # Machine-local state
 config.yaml
 agents/
+# Performance stats database
+stats.db*
