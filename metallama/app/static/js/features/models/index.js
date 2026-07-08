@@ -225,6 +225,7 @@ function openEditModal(modelId, isManaged) {
         const presetSelect = document.getElementById("edit-preset");
         if (presetSelect && data.preset) presetSelect.value = data.preset;
         updateCtxPlaceholder();
+        updateOverridesFold();
       });
       // Populate model selector from available .gguf files
       loadModelFiles().then((mdata) => {
@@ -271,8 +272,10 @@ function openCreateModal(type, prefill = null) {
     document.getElementById("edit-context-window").value = 32000;
     document.getElementById("edit-parallel").value = 1;
     // Populate preset select for create mode
-    populatePresetSelect();
-    updateCtxPlaceholder();
+    populatePresetSelect().then(() => {
+      updateCtxPlaceholder();
+      updateOverridesFold();
+    });
   }
   document.getElementById("edit-modal").classList.remove("is-hidden");
   document.getElementById("modal-delete-btn").classList.add("is-hidden");
@@ -296,6 +299,77 @@ async function updateCtxPlaceholder() {
   } catch {
     ctxInput.placeholder = "";
   }
+}
+
+/**
+ * Update the overrides fold: summary text + open/closed state.
+ * Open when any field has an explicit override OR no preset selected.
+ * Closed when a preset is selected and everything inherits.
+ */
+async function updateOverridesFold() {
+  const details = document.getElementById("edit-overrides");
+  if (!details) return;
+
+  const ctxVal = document.getElementById("edit-context-window")?.value?.trim();
+  const parVal = document.getElementById("edit-parallel")?.value?.trim();
+  const argsRaw = document.getElementById("edit-extra-args")?.value || "";
+  const args = argsRaw.split("\n").map((s) => s.trim()).filter(Boolean);
+  const draftVal = document.getElementById("edit-model-draft")?.value?.trim();
+  const presetName = document.getElementById("edit-preset")?.value;
+
+  // Resolve effective values from preset if selected
+  let presetCtx = null, presetPar = null, presetArgs = [];
+  if (presetName) {
+    try {
+      const data = await api("/api/presets");
+      const p = (data.presets || []).find((x) => x.name === presetName);
+      if (p) {
+        presetCtx = p.context_window;
+        presetPar = p.parallel;
+        presetArgs = p.extra_args || [];
+      }
+    } catch { /* ignore */ }
+  }
+
+  const hasOverride = (ctxVal !== "" || parVal !== "1" || args.length > 0 || draftVal) && !presetName;
+  const hasPresetOverride = presetName && (ctxVal !== "" || parVal !== "1" || args.length > 0 || draftVal);
+  const noPreset = !presetName;
+
+  // Build summary label
+  const effectiveCtx = ctxVal || (presetCtx != null ? presetCtx : "auto");
+  const effectivePar = parVal || (presetPar != null ? String(presetPar) : "auto");
+  const effectiveArgs = args.length > 0 ? args : (presetArgs || []);
+  const effectiveDraft = draftVal;
+
+  const parts = [`CTX ${effectiveCtx}`, `PAR ${effectivePar}`];
+  if (effectiveArgs.length > 0) parts.push(`${effectiveArgs.length} args`);
+  if (effectiveDraft) parts.push(`draft: ${effectiveDraft.split(/[\\/]/).pop()}`);
+
+  let label = parts.join(" · ");
+  if (presetName && !hasPresetOverride) {
+    label += ` — from ${presetName}`;
+  } else if (hasPresetOverride) {
+    label += " · overridden";
+  }
+
+  const labelEl = details.querySelector(".overrides-fold-label");
+  if (labelEl) labelEl.textContent = label;
+
+  // Open if any override exists or no preset selected
+  const shouldOpen = noPreset || hasOverride || hasPresetOverride;
+  if (shouldOpen && !details.open) details.open = true;
+  else if (!shouldOpen && details.open) details.open = false;
+}
+
+/** Attach input listeners on folded fields to update the summary. */
+function bindOverridesFoldInputs() {
+  const details = document.getElementById("edit-overrides");
+  if (!details) return;
+  const fields = details.querySelectorAll("input, select, textarea");
+  fields.forEach((f) => {
+    f.addEventListener("input", () => updateOverridesFold());
+    f.addEventListener("change", () => updateOverridesFold());
+  });
 }
 
 // Open the create modal pre-filled for a freshly downloaded model file.
@@ -1182,6 +1256,10 @@ export function setupModels() {
       } catch (e) {
         // ignore
       }
+      updateOverridesFold();
     });
   }
+
+  // Bind overrides fold input listeners
+  bindOverridesFoldInputs();
 }

@@ -2107,3 +2107,43 @@ body.admin-locked .disabled-readonly {
   letter-spacing: 0.04em;
   font-weight: 600;
 }
+
+/* ── Overrides Fold (server modal) ─────────────────────── */
+.overrides-fold {
+  margin: 0.5rem 0;
+  border: var(--border-size) solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+}
+
+.overrides-fold summary {
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  user-select: none;
+}
+
+.overrides-fold summary::-webkit-details-marker { display: none; }
+
+.overrides-fold summary .marker {
+  display: inline-block;
+  transition: transform 0.15s;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.overrides-fold[open] summary .marker {
+  transform: rotate(90deg);
+}
+
+.overrides-fold-body {
+  padding: 0.3rem 0.7rem 0.7rem;
+}
