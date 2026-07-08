@@ -1,4 +1,5 @@
 import { api } from "../../core/api.js";
+import { setConfigMessage } from "../../core/uiMessage.js";
 
 function escapeHtml(s) {
   const div = document.createElement("div");
@@ -83,6 +84,8 @@ export function savePreset() {
   const name = document.getElementById("preset-name").value.trim();
   if (!name) return;
 
+  const wasCreate = !editingPresetName;
+
   const payload = {
     name,
     description: document.getElementById("preset-description").value.trim() || null,
@@ -101,12 +104,15 @@ export function savePreset() {
   }).then(() => {
     return loadPresets().then(() => {
       renderPresetsList();
-      if (editingPresetName) {
+      setConfigMessage(`Preset '${name}' saved`);
+      if (wasCreate) {
         clearPresetForm();
       }
       // Refresh the preset select in the create/edit modal
       populatePresetSelect();
     });
+  }).catch((err) => {
+    throw err;
   });
 }
 
