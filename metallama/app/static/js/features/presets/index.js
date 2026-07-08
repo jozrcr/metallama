@@ -42,12 +42,11 @@ function renderPresetsList() {
 
   presets.forEach((p) => {
     const row = document.createElement("div");
-    row.className = "config-row";
-    row.style.cursor = "pointer";
-    row.style.padding = "0.5rem 0";
+    row.className = "preset-row";
     row.innerHTML = `
-      <span class="config-key" style="font-weight:600;">✦ ${escapeHtml(p.name)}</span>
-      <span class="config-value">${p.description ? escapeHtml(p.description) : ""}</span>
+      <span class="preset-row-name">✦ ${escapeHtml(p.name)}</span>
+      <span class="preset-row-desc">${p.description ? escapeHtml(p.description) : ""}</span>
+      <span class="preset-row-action"><span class="preset-row-chevron">›</span> <span class="preset-row-edit">Edit</span></span>
     `;
     row.addEventListener("click", () => editPreset(p.name));
     container.appendChild(row);
