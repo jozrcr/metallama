@@ -33,12 +33,20 @@
 
       <section class="side-panel perf-graph-panel">
         <div class="perf-graph-head">
-          <h2 class="side-title">Generation speed</h2>
-          <span class="perf-legend"><i class="perf-swatch" style="background:var(--blue)"></i> gen tok/s
-            <i class="perf-swatch" style="background:var(--accent-2)"></i> prompt tok/s ÷ 10</span>
+          <h2 class="side-title">Generation speed (tok/s)</h2>
+          <span class="perf-legend"><i class="perf-swatch" style="background:var(--blue)"></i> gen tok/s</span>
         </div>
-        <canvas id="graph-speed" class="perf-canvas" width="1100" height="180"></canvas>
-        <p id="speed-empty" class="library-empty is-hidden">No data yet — send some requests through the gateway.</p>
+        <canvas id="graph-gen-speed" class="perf-canvas" width="1100" height="180"></canvas>
+        <p id="gen-speed-empty" class="library-empty is-hidden">No data yet — send some requests through the gateway.</p>
+      </section>
+
+      <section class="side-panel perf-graph-panel">
+        <div class="perf-graph-head">
+          <h2 class="side-title">Prompt processing (tok/s)</h2>
+          <span class="perf-legend"><i class="perf-swatch" style="background:var(--accent-2)"></i> prompt tok/s</span>
+        </div>
+        <canvas id="graph-pp-speed" class="perf-canvas" width="1100" height="180"></canvas>
+        <p id="pp-speed-empty" class="library-empty is-hidden">No data yet — send some requests through the gateway.</p>
       </section>
 
       <section class="side-panel perf-graph-panel" id="rss-panel">
@@ -102,35 +110,39 @@
         return t1 === t0 ? w : ((ts - t0) / (t1 - t0)) * (w - 10) + 5;
       }
 
-      function drawSpeed(series) {
-        const canvas = document.getElementById("graph-speed");
+      function drawImpulses(canvasId, points, color) {
+        const canvas = document.getElementById(canvasId);
         const ctx = canvas.getContext("2d");
         const { width: w, height: h } = canvas;
         ctx.clearRect(0, 0, w, h);
-        document.getElementById("speed-empty").classList.toggle("is-hidden", series.length > 0);
-        if (!series.length) return;
+        if (!points.length) return;
         drawAxes(ctx, w, h);
         const t1 = Date.now();
         const t0 = t1 - hours * 3600 * 1000;
-        const gens = series.map((r) => r[1]).filter((v) => v != null);
-        const pps = series.map((r) => r[2] != null ? r[2] / 10 : null).filter((v) => v != null);
-        const maxY = Math.max(10, ...gens, ...pps) * 1.15;
-        for (const [ts, gen, pp] of series) {
+        const values = points.map((p) => p[1]);
+        const maxY = Math.max(10, ...values) * 1.15;
+        for (const [ts, val] of points) {
           const x = timeToX(ts, t0, t1, w);
-          if (gen != null) {                      // impulse bar per request
-            const y = h - (gen / maxY) * (h - 8) - 4;
-            ctx.strokeStyle = cssVar("--blue"); ctx.lineWidth = 2;
-            ctx.beginPath(); ctx.moveTo(x, h - 4); ctx.lineTo(x, y); ctx.stroke();
-          }
-          if (pp != null) {                       // prompt speed ÷10 as dots
-            const y = h - ((pp / 10) / maxY) * (h - 8) - 4;
-            ctx.fillStyle = cssVar("--accent-2");
-            ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
-          }
+          const y = h - (val / maxY) * (h - 8) - 4;
+          ctx.strokeStyle = color; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x, h - 4); ctx.lineTo(x, y); ctx.stroke();
         }
         ctx.fillStyle = cssVar("--muted");
         ctx.font = "11px ui-monospace, monospace";
         ctx.fillText(`max ${Math.round(maxY)} t/s`, 6, 12);
+      }
+
+      function drawSpeed(series) {
+        const genPoints = [];
+        const ppPoints = [];
+        for (const row of series) {
+          if (row[1] != null) genPoints.push([row[0], row[1]]);
+          if (row[2] != null) ppPoints.push([row[0], row[2]]);
+        }
+        document.getElementById("gen-speed-empty").classList.toggle("is-hidden", genPoints.length > 0);
+        document.getElementById("pp-speed-empty").classList.toggle("is-hidden", ppPoints.length > 0);
+        drawImpulses("graph-gen-speed", genPoints, cssVar("--blue"));
+        drawImpulses("graph-pp-speed", ppPoints, cssVar("--accent-2"));
       }
 
       function drawRss(samples, events) {
