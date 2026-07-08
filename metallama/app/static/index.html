@@ -150,28 +150,31 @@
                   <option value></option>
                 </select>
               </div>
-              <details id="edit-overrides" class="overrides-fold managed-only">
-                <summary><span class="marker">›</span> <span class="overrides-fold-label">Overrides &amp; advanced</span></summary>
-                <div class="overrides-fold-body">
-                  <div class="form-group">
-                    <label for="edit-model-draft">Draft Model (Optional)</label>
-                    <select id="edit-model-draft"></select>
-                    <p id="edit-model-draft-warning" class="model-not-found-warning is-hidden"></p>
+              <div class="form-group managed-only">
+                <label for="edit-preset">Overrides</label>
+                <details id="edit-overrides" class="overrides-fold managed-only">
+                  <summary><span class="marker">›</span> <span class="overrides-fold-label">Overrides &amp; advanced</span></summary>
+                  <div class="overrides-fold-body">
+                    <div class="form-group">
+                      <label for="edit-context-window">Context Window</label>
+                      <input type="number" id="edit-context-window" min="1" step="1000" />
+                    </div>
+                    <div class="form-group">
+                      <label for="edit-parallel">Parallel Slots</label>
+                      <input type="number" id="edit-parallel" min="1" />
+                    </div>
+                    <div class="form-group fold-span">
+                      <label for="edit-extra-args">Extra Args (one per line)</label>
+                      <textarea id="edit-extra-args"></textarea>
+                    </div>
+                    <div class="form-group fold-span">
+                      <label for="edit-model-draft">Draft Model (Optional)</label>
+                      <select id="edit-model-draft"></select>
+                      <p id="edit-model-draft-warning" class="model-not-found-warning is-hidden"></p>
+                    </div>
                   </div>
-                  <div class="form-group">
-                    <label for="edit-context-window">Context Window</label>
-                    <input type="number" id="edit-context-window" min="1" step="1000" />
-                  </div>
-                  <div class="form-group">
-                    <label for="edit-parallel">Parallel Slots</label>
-                    <input type="number" id="edit-parallel" min="1" />
-                  </div>
-                  <div class="form-group">
-                    <label for="edit-extra-args">Extra Args (one per line)</label>
-                    <textarea id="edit-extra-args"></textarea>
-                  </div>
-                </div>
-              </details>
+                </details>
+              </div>
             </div>
           </div>
         </div>

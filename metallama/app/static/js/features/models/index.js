@@ -225,7 +225,7 @@ function openEditModal(modelId, isManaged) {
         const presetSelect = document.getElementById("edit-preset");
         if (presetSelect && data.preset) presetSelect.value = data.preset;
         updateCtxPlaceholder();
-        updateOverridesFold();
+        initOverridesFold();
       });
       // Populate model selector from available .gguf files
       loadModelFiles().then((mdata) => {
@@ -274,7 +274,7 @@ function openCreateModal(type, prefill = null) {
     // Populate preset select for create mode
     populatePresetSelect().then(() => {
       updateCtxPlaceholder();
-      updateOverridesFold();
+      initOverridesFold();
     });
   }
   document.getElementById("edit-modal").classList.remove("is-hidden");
@@ -301,74 +301,67 @@ async function updateCtxPlaceholder() {
   }
 }
 
-/**
- * Update the overrides fold: summary text + open/closed state.
- * Open when any field has an explicit override OR no preset selected.
- * Closed when a preset is selected and everything inherits.
- */
-async function updateOverridesFold() {
-  const details = document.getElementById("edit-overrides");
-  if (!details) return;
+// ── Overrides fold ────────────────────────────────────────
+// Policy: the open/closed state is decided ONCE when the modal opens
+// (initOverridesFold). After that only the summary label updates — the
+// user's manual toggle is never overridden.
+let foldPreset = { ctx: null, par: null, args: [] };
 
-  const ctxVal = document.getElementById("edit-context-window")?.value?.trim();
-  const parVal = document.getElementById("edit-parallel")?.value?.trim();
-  const argsRaw = document.getElementById("edit-extra-args")?.value || "";
-  const args = argsRaw.split("\n").map((s) => s.trim()).filter(Boolean);
-  const draftVal = document.getElementById("edit-model-draft")?.value?.trim();
-  const presetName = document.getElementById("edit-preset")?.value;
-
-  // Resolve effective values from preset if selected
-  let presetCtx = null, presetPar = null, presetArgs = [];
-  if (presetName) {
-    try {
-      const data = await api("/api/presets");
-      const p = (data.presets || []).find((x) => x.name === presetName);
-      if (p) {
-        presetCtx = p.context_window;
-        presetPar = p.parallel;
-        presetArgs = p.extra_args || [];
-      }
-    } catch { /* ignore */ }
-  }
-
-  const hasOverride = (ctxVal !== "" || parVal !== "1" || args.length > 0 || draftVal) && !presetName;
-  const hasPresetOverride = presetName && (ctxVal !== "" || parVal !== "1" || args.length > 0 || draftVal);
-  const noPreset = !presetName;
-
-  // Build summary label
-  const effectiveCtx = ctxVal || (presetCtx != null ? presetCtx : "auto");
-  const effectivePar = parVal || (presetPar != null ? String(presetPar) : "auto");
-  const effectiveArgs = args.length > 0 ? args : (presetArgs || []);
-  const effectiveDraft = draftVal;
-
-  const parts = [`CTX ${effectiveCtx}`, `PAR ${effectivePar}`];
-  if (effectiveArgs.length > 0) parts.push(`${effectiveArgs.length} args`);
-  if (effectiveDraft) parts.push(`draft: ${effectiveDraft.split(/[\\/]/).pop()}`);
-
-  let label = parts.join(" · ");
-  if (presetName && !hasPresetOverride) {
-    label += ` — from ${presetName}`;
-  } else if (hasPresetOverride) {
-    label += " · overridden";
-  }
-
-  const labelEl = details.querySelector(".overrides-fold-label");
-  if (labelEl) labelEl.textContent = label;
-
-  // Open if any override exists or no preset selected
-  const shouldOpen = noPreset || hasOverride || hasPresetOverride;
-  if (shouldOpen && !details.open) details.open = true;
-  else if (!shouldOpen && details.open) details.open = false;
+async function loadFoldPreset(presetName) {
+  foldPreset = { ctx: null, par: null, args: [] };
+  if (!presetName) return;
+  try {
+    const data = await api("/api/presets");
+    const p = (data.presets || []).find((x) => x.name === presetName);
+    if (p) foldPreset = { ctx: p.context_window, par: p.parallel, args: p.extra_args || [] };
+  } catch { /* label falls back to raw values */ }
 }
 
-/** Attach input listeners on folded fields to update the summary. */
+function foldState() {
+  const ctxVal = document.getElementById("edit-context-window")?.value?.trim() || "";
+  const parVal = document.getElementById("edit-parallel")?.value?.trim() || "";
+  const args = (document.getElementById("edit-extra-args")?.value || "")
+    .split("\n").map((s) => s.trim()).filter(Boolean);
+  const draftVal = document.getElementById("edit-model-draft")?.value?.trim() || "";
+  const presetName = document.getElementById("edit-preset")?.value || "";
+  const overridden = ctxVal !== "" || (parVal !== "" && parVal !== "1") || args.length > 0 || !!draftVal;
+  return { ctxVal, parVal, args, draftVal, presetName, overridden };
+}
+
+function updateOverridesLabel() {
+  const labelEl = document.querySelector("#edit-overrides .overrides-fold-label");
+  if (!labelEl) return;
+  const s = foldState();
+  const ctx = s.ctxVal || (foldPreset.ctx != null ? foldPreset.ctx : "auto");
+  const par = s.parVal || (foldPreset.par != null ? String(foldPreset.par) : "1");
+  const parts = [`CTX ${ctx}`, `PAR ${par}`];
+  // args LAYER (preset's + server's, last flag wins) — they never replace
+  if (s.args.length && foldPreset.args.length) parts.push(`${foldPreset.args.length}+${s.args.length} args`);
+  else if (s.args.length || foldPreset.args.length) parts.push(`${s.args.length || foldPreset.args.length} args`);
+  if (s.draftVal) parts.push(`draft: ${s.draftVal.split(/[\\/]/).pop()}`);
+  // only ctx/par/draft actually REPLACE a preset value
+  const coreOverride = s.ctxVal !== "" || (s.parVal !== "" && s.parVal !== "1") || !!s.draftVal;
+  let label = "Overrides · " + parts.join(" · ");
+  if (s.presetName) label += coreOverride ? " · overridden" : ` — from ${s.presetName}`;
+  labelEl.textContent = label;
+}
+
+async function initOverridesFold() {
+  const details = document.getElementById("edit-overrides");
+  if (!details) return;
+  await loadFoldPreset(foldState().presetName);
+  updateOverridesLabel();
+  const s = foldState();
+  details.open = !s.presetName || s.overridden;
+}
+
+/** Folded fields update the summary label only (never the open state). */
 function bindOverridesFoldInputs() {
   const details = document.getElementById("edit-overrides");
   if (!details) return;
-  const fields = details.querySelectorAll("input, select, textarea");
-  fields.forEach((f) => {
-    f.addEventListener("input", () => updateOverridesFold());
-    f.addEventListener("change", () => updateOverridesFold());
+  details.querySelectorAll("input, select, textarea").forEach((f) => {
+    f.addEventListener("input", updateOverridesLabel);
+    f.addEventListener("change", updateOverridesLabel);
   });
 }
 
@@ -1240,23 +1233,12 @@ export function setupModels() {
   // Populate preset select on first load
   populatePresetSelect().catch(() => {});
 
-  // Preset select change handler: prefill context_window and parallel
+  // Preset select change: values INHERIT (empty fields = from preset) —
+  // no prefill, that would bake instant overrides. Refresh hint + fold.
   if (presetSelect) {
-    presetSelect.addEventListener("change", async () => {
-      const presetName = presetSelect.value;
-      if (!presetName) return;
-      try {
-        const data = await api("/api/presets");
-        const preset = (data.presets || []).find((p) => p.name === presetName);
-        if (!preset) return;
-        const ctxInput = document.getElementById("edit-context-window");
-        const parInput = document.getElementById("edit-parallel");
-        if (preset.context_window && ctxInput.value === "") ctxInput.value = preset.context_window;
-        if (preset.parallel && parInput.value === "") parInput.value = preset.parallel;
-      } catch (e) {
-        // ignore
-      }
-      updateOverridesFold();
+    presetSelect.addEventListener("change", () => {
+      updateCtxPlaceholder();
+      initOverridesFold();
     });
   }
 

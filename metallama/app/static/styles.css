@@ -663,6 +663,26 @@ button {
   transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
 }
 
+a.btn-secondary,
+a.btn-primary {
+  text-decoration: none;
+  background: var(--btn-bg);
+  color: var(--btn-text);
+  border: 0;
+  padding: 0.5rem 1.1rem;
+  font-weight: 650;
+  font-size: 0.85rem;
+  font-family: inherit;
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: opacity 0.15s ease, background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
 button:active:not(:disabled) {
   transform: scale(0.98);
 }
@@ -823,8 +843,13 @@ button:disabled {
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.4);
 }
 #edit-modal .modal-dialog {
-  height: 90vh;
+  height: auto;
   max-height: 90vh;
+  max-width: 620px;
+}
+
+.modal-columns:has(> .modal-column:only-child) {
+  grid-template-columns: 1fr;
 }
 #login-modal .modal-dialog {
   max-width: 360px;
@@ -2146,4 +2171,46 @@ body.admin-locked .disabled-readonly {
 
 .overrides-fold-body {
   padding: 0.3rem 0.7rem 0.7rem;
+}
+
+/* ── Overrides fold: layout + affordance ───────────────── */
+.overrides-fold-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 1rem;
+  padding: 0.35rem 0.7rem 0.75rem;
+}
+
+.overrides-fold-body .fold-span {
+  grid-column: 1 / -1;
+}
+
+.overrides-fold-body textarea {
+  min-height: 110px;
+}
+
+.overrides-fold summary:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+}
+
+.overrides-fold summary::after {
+  content: "configure";
+  margin-left: auto;
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  color: var(--blue);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.overrides-fold summary:hover::after {
+  opacity: 1;
+}
+
+.overrides-fold[open] summary {
+  border-bottom: var(--border-size) solid color-mix(in srgb, var(--line) 55%, transparent);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
